@@ -44,7 +44,7 @@ const formSchema = z.object({
   retailPrice: z.coerce.number().optional(), // Campo para anulación manual
   hasPromoPrice: z.boolean().optional(),
   promoPrice: z.coerce.number().optional(),
-  stockLevel: z.coerce.number().int({ message: "El stock debe ser un número entero." }).min(1, "El stock debe ser al menos 1."),
+  stockLevel: z.coerce.number().int({ message: "El stock debe ser un número entero." }).min(0, "El stock no puede ser negativo."),
   lowStockThreshold: z.coerce.number().int({ message: "El umbral debe ser un número entero." }).min(1, "La alerta debe ser al menos 1."),
   compatibleModels: z.string().optional(),
 });
@@ -373,5 +373,3 @@ export function ProductFormDialog({ product, children, productCount = 0 }: Produ
     </Dialog>
   );
 }
-
-    

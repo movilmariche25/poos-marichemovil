@@ -1,0 +1,1 @@
+Por favor, reemplaza este archivo con tus iconos 'icon-192x192.png' y 'icon-512x512.png' para que la aplicación web progresiva (PWA) se muestre correctamente al ser instalada.

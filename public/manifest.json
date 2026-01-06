@@ -1,11 +1,11 @@
 {
   "name": "Mariche Movil",
-  "short_name": "Mariche Movil",
+  "short_name": "POS Offline",
   "description": "Inventario y POS para Tiendas de Reparación de Móviles",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#FFFFFF",
-  "theme_color": "#22039%18%",
+  "background_color": "#28354a",
+  "theme_color": "#28354a",
   "icons": [
     {
       "src": "/icons/icon-192x192.png",

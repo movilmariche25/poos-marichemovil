@@ -8,14 +8,26 @@ import { differenceInHours } from "date-fns";
 import { Button } from "../ui/button";
 import Link from "next/link";
 import { Skeleton } from "../ui/skeleton";
+import { useState, useEffect } from "react";
 
 // The reminder will show if the exchange rate is older than this many hours
 const REMINDER_THRESHOLD_HOURS = 4;
 
 export function ExchangeRateReminder() {
     const { settings, isLoading, bcvRate, parallelRate } = useCurrency();
+    const [hoursSinceUpdate, setHoursSinceUpdate] = useState<number | null>(null);
 
-    if (isLoading) {
+    useEffect(() => {
+        if (settings && settings.lastUpdated) {
+            setHoursSinceUpdate(differenceInHours(new Date(), new Date(settings.lastUpdated)));
+        } else if (!isLoading) {
+            // If not loading and still no settings, we can consider it "infinite" hours
+            setHoursSinceUpdate(Infinity);
+        }
+    }, [settings, isLoading]);
+
+
+    if (isLoading || hoursSinceUpdate === null) {
         return (
             <div className="p-4 border-b">
                 <Skeleton className="h-24 w-full" />
@@ -45,8 +57,6 @@ export function ExchangeRateReminder() {
         );
     }
     
-    const hoursSinceUpdate = differenceInHours(new Date(), new Date(settings.lastUpdated));
-
     if (hoursSinceUpdate < REMINDER_THRESHOLD_HOURS) {
         // If the rate is fresh, don't show anything
         return null;

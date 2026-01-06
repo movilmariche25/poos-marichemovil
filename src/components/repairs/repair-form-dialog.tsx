@@ -33,7 +33,7 @@ import { useCurrency } from "@/hooks/use-currency";
 import { Checkbox } from "../ui/checkbox";
 import { Label } from "../ui/label";
 import { useFirebase, setDocumentNonBlocking, addDocumentNonBlocking, useCollection, useMemoFirebase } from "@/firebase";
-import { collection, doc, writeBatch, query, where, getDocs } from "firebase/firestore";
+import { collection, doc, writeBatch, query, where, getDocs, getDoc } from "firebase/firestore";
 import { handlePrintTicket } from "./repair-ticket";
 import { AlertCircle, Info, Printer, Search, Trash2, UserSearch } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
@@ -110,16 +110,18 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
   const uniqueCustomers = useMemo(() => {
     if (!allRepairJobs) return [];
     const customerMap = new Map<string, { name: string; phone: string; id?: string; address?: string }>();
-    allRepairJobs.forEach(job => {
-      if (job.customerPhone && !customerMap.has(job.customerPhone)) {
-        customerMap.set(job.customerPhone, { 
-            name: job.customerName, 
-            phone: job.customerPhone,
-            id: job.customerID,
-            address: job.customerAddress
-        });
-      }
-    });
+    // Iterate backwards to get the most recent data for a customer
+    for (let i = allRepairJobs.length - 1; i >= 0; i--) {
+        const job = allRepairJobs[i];
+        if (job.customerPhone && !customerMap.has(job.customerPhone)) {
+            customerMap.set(job.customerPhone, { 
+                name: job.customerName, 
+                phone: job.customerPhone,
+                id: job.customerID,
+                address: job.customerAddress
+            });
+        }
+    }
     return Array.from(customerMap.values());
   }, [allRepairJobs]);
 
@@ -152,45 +154,45 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
   const imeiValue = form.watch('deviceImei');
   const [debouncedImei] = useDebounce(imeiValue, 500); 
 
-  const checkWarranty = useCallback(async (imei: string) => {
-    if (!imei || !repairsCollection || (repairJob && imei === repairJob.deviceImei)) {
-        setWarrantyInfo(null);
-        return;
-    };
-
-    const q = query(
-        repairsCollection,
-        where("deviceImei", "==", imei),
-        where("status", "==", "Completado")
-    );
-    
-    const querySnapshot = await getDocs(q);
-    const now = new Date();
-    let activeWarranty: { message: string, date: string } | null = null;
-
-    querySnapshot.forEach((doc) => {
-        const job = doc.data() as RepairJob;
-        if (job.warrantyEndDate) {
-            const warrantyEnd = new Date(job.warrantyEndDate);
-            if (now < warrantyEnd) {
-                activeWarranty = {
-                    message: `Este dispositivo tiene una garantía activa de una reparación anterior (ID: ${job.id}).`,
-                    date: `Válida hasta: ${format(warrantyEnd, 'PPP', { locale: es })}`
-                };
-            }
-        }
-    });
-
-    setWarrantyInfo(activeWarranty);
-  }, [repairsCollection, repairJob]);
-
   useEffect(() => {
+    const checkWarranty = async (imei: string) => {
+        if (!imei || !repairsCollection || (repairJob && imei === repairJob.deviceImei)) {
+            setWarrantyInfo(null);
+            return;
+        };
+
+        const q = query(
+            repairsCollection,
+            where("deviceImei", "==", imei),
+            where("status", "==", "Completado")
+        );
+        
+        const querySnapshot = await getDocs(q);
+        const now = new Date();
+        let activeWarranty: { message: string, date: string } | null = null;
+
+        querySnapshot.forEach((doc) => {
+            const job = doc.data() as RepairJob;
+            if (job.warrantyEndDate) {
+                const warrantyEnd = new Date(job.warrantyEndDate);
+                if (now < warrantyEnd) {
+                    activeWarranty = {
+                        message: `Este dispositivo tiene una garantía activa de una reparación anterior (ID: ${job.id}).`,
+                        date: `Válida hasta: ${format(warrantyEnd, 'PPP', { locale: es })}`
+                    };
+                }
+            }
+        });
+
+        setWarrantyInfo(activeWarranty);
+    };
+    
     if (debouncedImei) {
         checkWarranty(debouncedImei);
     } else {
         setWarrantyInfo(null);
     }
-  }, [debouncedImei, checkWarranty]);
+  }, [debouncedImei, repairsCollection, repairJob]);
 
 
   useEffect(() => {
@@ -261,11 +263,11 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
         const change = reservationChanges[productId];
         if (change !== 0) {
             const productRef = doc(firestore, 'products', productId);
-            const productDoc = await getDocs(query(productsCollection!, where('id', '==', productId)));
-            if(!productDoc.empty){
-                const productData = productDoc.docs[0].data() as Product;
-                 const newReservedStock = (productData.reservedStock || 0) + change;
-                batch.update(productRef, { reservedStock: newReservedStock });
+            const productDoc = await getDoc(productRef); // Fetch the specific product document
+            if (productDoc.exists()) {
+                const productData = productDoc.data() as Product;
+                const newReservedStock = (productData.reservedStock || 0) + change;
+                batch.update(productRef, { reservedStock: newReservedStock < 0 ? 0 : newReservedStock });
             }
         }
     }
@@ -282,7 +284,7 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
         };
     }
 
-    const finalValues = { ...values, notes: values.notes || "" };
+    const finalValues = { ...values, notes: values.notes || "", reservedParts: values.reservedParts || [] };
 
     if (repairJob) {
       const jobRef = doc(firestore, 'repair_jobs', repairJob.id!);
@@ -562,3 +564,5 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
     </Dialog>
   );
 }
+
+    

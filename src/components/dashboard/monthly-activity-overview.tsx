@@ -8,6 +8,7 @@ import { format as formatDate, startOfMonth, endOfMonth, eachDayOfInterval, isSa
 import { es } from 'date-fns/locale';
 import { useCurrency } from "@/hooks/use-currency";
 import { Skeleton } from "../ui/skeleton";
+import { useMemo } from "react";
 
 type MonthlyActivityOverviewProps = {
   sales: Sale[];
@@ -15,33 +16,48 @@ type MonthlyActivityOverviewProps = {
   isLoading?: boolean;
 };
 
+type ChartData = {
+    name: string;
+    ventas: number;
+    reparaciones: number;
+}[];
+
 export function MonthlyActivityOverview({ sales, repairJobs, isLoading }: MonthlyActivityOverviewProps) {
   const { format: formatCurrency, getSymbol } = useCurrency();
-  const now = new Date();
-  const firstDayOfMonth = startOfMonth(now);
-  const lastDayOfMonth = endOfMonth(now);
-  const daysInMonth = eachDayOfInterval({ start: firstDayOfMonth, end: lastDayOfMonth });
+  
+  const { chartData, currentMonth } = useMemo(() => {
+    if (isLoading || !sales || !repairJobs) return { chartData: [], currentMonth: '' };
 
-  const data = daysInMonth.map(day => {
-    const dailySales = sales
-      .filter(s => isSameDay(new Date(s.transactionDate), day) && s.status !== 'refunded')
-      .reduce((acc, s) => acc + s.totalAmount, 0);
-    
-    const dailyRepairs = repairJobs
-      .filter(r => r.createdAt && isSameDay(new Date(r.createdAt), day))
-      .length;
+    const now = new Date();
+    const currentMonthName = formatDate(now, 'MMMM yyyy', { locale: es });
+    const firstDayOfMonth = startOfMonth(now);
+    const lastDayOfMonth = endOfMonth(now);
+    const daysInMonth = eachDayOfInterval({ start: firstDayOfMonth, end: lastDayOfMonth });
 
-    return {
-      name: formatDate(day, 'd'),
-      ventas: dailySales,
-      reparaciones: dailyRepairs,
-    };
-  });
+    const data = daysInMonth.map(day => {
+      const dailySales = sales
+        .filter(s => s.transactionDate && isSameDay(new Date(s.transactionDate), day) && s.status !== 'refunded')
+        .reduce((acc, s) => acc + s.totalAmount, 0);
+      
+      const dailyRepairs = repairJobs
+        .filter(r => r.createdAt && isSameDay(new Date(r.createdAt), day))
+        .length;
+
+      return {
+        name: formatDate(day, 'd'),
+        ventas: dailySales,
+        reparaciones: dailyRepairs,
+      };
+    });
+
+    return { chartData: data, currentMonth: currentMonthName };
+  }, [sales, repairJobs, isLoading]);
+
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Actividad Mensual ({formatDate(now, 'MMMM yyyy', { locale: es })})</CardTitle>
+        <CardTitle>Actividad Mensual ({currentMonth})</CardTitle>
         <CardDescription>Un resumen de las ventas y reparaciones registradas este mes.</CardDescription>
       </CardHeader>
       <CardContent className="pl-2">
@@ -51,7 +67,7 @@ export function MonthlyActivityOverview({ sales, repairJobs, isLoading }: Monthl
             </div>
         ) : (
         <ResponsiveContainer width="100%" height={350}>
-          <LineChart data={data}>
+          <LineChart data={chartData}>
             <XAxis
               dataKey="name"
               stroke="hsl(var(--muted-foreground))"

@@ -34,6 +34,7 @@ export type RepairJob = {
   deviceMake: string;
   deviceModel: string;
   deviceImei?: string;
+  devicePatternOrPassword?: string;
   reportedIssue: string;
   initialConditionsChecklist?: string[];
   estimatedCost: number;
@@ -83,7 +84,29 @@ export type Sale = {
   status: 'completed' | 'refunded';
   refundedAt?: string;
   refundReason?: string;
+  reconciliationId?: string; // ID linking to the daily reconciliation
 };
+
+export type ReconciliationPaymentMethodSummary = {
+  expected: number;
+  counted: number;
+  difference: number;
+};
+
+export type DailyReconciliation = {
+  id: string;
+  date: string; // YYYY-MM-DD format
+  totalSales: number;
+  totalTransactions: number;
+  closedAt: string; // ISO 8601 string
+  paymentMethods: {
+    [key in PaymentMethod]?: ReconciliationPaymentMethodSummary;
+  };
+  totalExpected: number;
+  totalCounted: number;
+  totalDifference: number;
+};
+
 
 export type Currency = 'USD' | 'Bs';
 

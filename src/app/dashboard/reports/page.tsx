@@ -1,9 +1,11 @@
+
+
 "use client";
 
 import { PageHeader } from "@/components/page-header";
 import { ReportsView } from "@/components/reports/reports-view";
 import { useCollection, useFirebase, useMemoFirebase } from "@/firebase";
-import type { Product, Sale } from "@/lib/types";
+import type { Product, Sale, RepairJob } from "@/lib/types";
 import { collection } from "firebase/firestore";
 
 
@@ -22,6 +24,12 @@ export default function ReportsPage() {
     );
     const { data: products, isLoading: productsLoading } = useCollection<Product>(productsCollection);
 
+    const repairJobsCollection = useMemoFirebase(() =>
+        firestore ? collection(firestore, "repair_jobs") : null,
+        [firestore]
+    );
+    const { data: repairJobs, isLoading: repairsLoading } = useCollection<RepairJob>(repairJobsCollection);
+
     return (
         <>
             <PageHeader title="Reportes" />
@@ -29,7 +37,8 @@ export default function ReportsPage() {
                 <ReportsView 
                     sales={sales || []} 
                     products={products || []} 
-                    isLoading={salesLoading || productsLoading}
+                    repairJobs={repairJobs || []}
+                    isLoading={salesLoading || productsLoading || repairsLoading}
                 />
             </main>
         </>

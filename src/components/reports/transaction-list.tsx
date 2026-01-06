@@ -10,7 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { ReceiptView, handlePrintReceipt } from "../pos/receipt-view";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../ui/dialog";
 import { Button } from "../ui/button";
-import { Printer, Undo2 } from "lucide-react";
+import { Printer, Undo2, CheckCircle2 } from "lucide-react";
 import React, { useState, useCallback } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "../ui/skeleton";
@@ -264,6 +264,7 @@ export function TransactionList({ sales, isLoading }: TransactionListProps) {
                                 <p className="text-xs text-muted-foreground">{sale.id}</p>
                             </div>
                             <div className="flex items-center gap-4">
+                                {sale.reconciliationId && <Badge variant="outline" className="border-green-600 text-green-600"><CheckCircle2 className="mr-1 h-3 w-3"/>Cerrada</Badge>}
                                 {sale.status === 'refunded' && <Badge variant="destructive">Reembolsado</Badge>}
                                 <p className="font-semibold text-lg">{getSymbol()}{formatCurrency(sale.totalAmount)}</p>
                             </div>
@@ -319,5 +320,3 @@ export function TransactionList({ sales, isLoading }: TransactionListProps) {
         </Accordion>
     )
 }
-
-    

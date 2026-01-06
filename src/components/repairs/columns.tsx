@@ -30,12 +30,13 @@ import { format, parseISO, addDays } from "date-fns"
 import { es } from "date-fns/locale"
 import { useCurrency } from "@/hooks/use-currency"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select"
-import { useFirebase, updateDocumentNonBlocking, deleteDocumentNonBlocking, useCollection, useMemoFirebase } from "@/firebase"
+import { useFirebase, updateDocumentNonBlocking, deleteDocumentNonBlocking } from "@/firebase"
 import { doc, writeBatch, getDoc } from "firebase/firestore"
 import { handlePrintTicket } from "./repair-ticket"
 import { PayRepairButton } from "./pay-repair-button"
 import { AdminAuthDialog } from "../admin-auth-dialog"
 import { useState } from "react"
+import { cn } from "@/lib/utils"
 
 const statusColors: Record<RepairStatus, "default" | "secondary" | "destructive" | "outline"> = {
     'Pendiente': 'destructive',
@@ -208,11 +209,16 @@ const StatusCell = ({ repairJob }: { repairJob: RepairJob }) => {
          badgeClassName = 'bg-green-500 text-white hover:bg-green-600';
     }
 
+    if (status === 'Completado') {
+        return <Badge variant={variant} className={badgeClassName}>{repairJob.status}</Badge>;
+    }
+
+
     return (
         <Select value={repairJob.status} onValueChange={handleStatusChange}>
             <SelectTrigger className="w-48 border-0 bg-transparent shadow-none focus:ring-0">
                 <SelectValue asChild>
-                     <Badge variant={variant} className={badgeClassName}>{repairJob.status}</Badge>
+                     <Badge variant={variant} className={cn(badgeClassName)}>{repairJob.status}</Badge>
                 </SelectValue>
             </SelectTrigger>
             <SelectContent>
@@ -259,6 +265,7 @@ export const columns: ColumnDef<RepairJob>[] = [
       </Button>
     ),
     cell: ({ row }) => {
+        if (!row.getValue("createdAt")) return null;
         const date = parseISO(row.getValue("createdAt"));
         return <div>{format(date, 'MMM d, yyyy', { locale: es })}</div>
     }
@@ -298,5 +305,3 @@ export const columns: ColumnDef<RepairJob>[] = [
     }
    },
 ]
-
-    

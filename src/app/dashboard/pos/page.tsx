@@ -9,7 +9,7 @@ import { useSearchParams } from "next/navigation";
 import { useToast } from "@/hooks/use-toast";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { useRouter } from "next/navigation";
-import { useCollection, useFirebase, useMemoFirebase, deleteDocumentNonBlocking, setDocumentNonBlocking } from "@/firebase";
+import { useCollection, useFirebase, useMemoFirebase, deleteDocumentNonBlocking, setDocumentNonBlocking, addDocumentNonBlocking } from "@/firebase";
 import { collection, doc } from "firebase/firestore";
 import { Button } from "@/components/ui/button";
 import { ParkingSquare } from "lucide-react";
@@ -226,19 +226,20 @@ function POSContent() {
         }
     }
     
-    const handleHoldSale = (name: string) => {
+    const handleHoldSale = async (name: string) => {
         if (!firestore || cart.length === 0) return;
 
-        const newHeldSale: Omit<HeldSale, 'id'> = {
+        const heldSalesCol = collection(firestore, 'held_sales');
+        const newHeldSaleDocRef = doc(heldSalesCol); // Create a new doc ref with an auto-generated ID
+
+        const newHeldSale: HeldSale = {
+            id: newHeldSaleDocRef.id,
             name,
             items: cart,
             createdAt: new Date().toISOString()
         };
 
-        const heldSaleId = doc(collection(firestore, 'dummy')).id;
-        const heldSaleRef = doc(firestore, 'held_sales', heldSaleId);
-        
-        setDocumentNonBlocking(heldSaleRef, { ...newHeldSale, id: heldSaleId });
+        setDocumentNonBlocking(newHeldSaleDocRef, newHeldSale);
 
         toast({
             title: "Venta Aparcada",

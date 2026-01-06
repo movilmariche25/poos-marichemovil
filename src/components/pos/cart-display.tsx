@@ -50,7 +50,7 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
 
       const batch = writeBatch(firestore);
 
-      // Handle stock and reservations
+      // Handle stock for regular product sales
       for (const item of cart) {
         if (!item.isRepair && item.productId) {
           const product = allProducts.find(p => p.id === item.productId);
@@ -61,21 +61,22 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
           }
         }
       }
-
+      
+      // Handle repair job completion
       if (repairJobId) {
         const repairJobRef = doc(firestore, 'repair_jobs', repairJobId);
         const repairJobDoc = await getDoc(repairJobRef);
         const repairJobData = repairJobDoc.data();
         
-        if (repairJobData && repairJobData.reservedParts) {
+        // Finalize stock for reserved parts
+        if (repairJobData && repairJobData.reservedParts && repairJobData.reservedParts.length > 0) {
             for (const part of repairJobData.reservedParts) {
                 const productRef = doc(firestore, 'products', part.productId);
                 const productDoc = await getDoc(productRef);
-                const productData = productDoc.data();
-                if (productData) {
+                if (productDoc.exists()) {
+                    const productData = productDoc.data();
                     const newReservedStock = (productData.reservedStock || 0) - part.quantity;
-                    // When completing the sale, the total stock also decreases.
-                    const newStockLevel = productData.stockLevel - part.quantity;
+                    const newStockLevel = productData.stockLevel - part.quantity; // Decrease total stock upon sale completion
                     batch.update(productRef, { 
                         stockLevel: newStockLevel < 0 ? 0 : newStockLevel,
                         reservedStock: newReservedStock < 0 ? 0 : newReservedStock 
@@ -85,13 +86,7 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
         }
         
         const currentAmountPaid = repairJobData?.amountPaid || 0;
-        const totalPaidForRepairThisTransaction = payments.reduce((acc, p) => {
-            if (p.method === 'Efectivo USD') return acc + p.amount;
-            if (p.method === 'Efectivo Bs' || p.method === 'Tarjeta' || p.method === 'Pago Móvil') {
-              return acc + convert(p.amount, 'Bs', 'USD');
-            }
-            return acc;
-        }, 0);
+        const totalPaidForRepairThisTransaction = cart.reduce((acc, item) => acc + (item.price * item.quantity), 0);
         const newTotalPaid = currentAmountPaid + totalPaidForRepairThisTransaction;
 
         batch.update(repairJobRef, { 

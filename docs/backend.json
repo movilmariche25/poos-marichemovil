@@ -1,3 +1,5 @@
+
+
 {
   "entities": {
     "Product": {
@@ -103,6 +105,10 @@
         "repairJobId": {
           "type": "string",
           "description": "Reference to RepairJob. (Relationship: RepairJob 1:1 SaleTransaction, optional)."
+        },
+        "reconciliationId": {
+            "type": "string",
+            "description": "ID of the daily reconciliation this sale belongs to."
         }
       },
       "required": [
@@ -189,6 +195,49 @@
         "estimatedCost",
         "status"
       ]
+    },
+    "DailyReconciliation": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "DailyReconciliation",
+      "type": "object",
+      "description": "Stores a record of a completed daily sales reconciliation.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the reconciliation (e.g., YYYY-MM-DD)."
+        },
+        "date": {
+          "type": "string",
+          "description": "The date of the reconciliation in YYYY-MM-DD format."
+        },
+        "totalSales": {
+          "type": "number",
+          "description": "The total sales amount for the reconciled period."
+        },
+        "totalTransactions": {
+          "type": "number",
+          "description": "The total number of transactions reconciled."
+        },
+        "closedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The timestamp when the reconciliation was performed."
+        },
+        "paymentMethods": {
+            "type": "object",
+            "description": "A summary of expected vs counted amounts for each payment method."
+        },
+        "totalExpected": {
+            "type": "number"
+        },
+        "totalCounted": {
+            "type": "number"
+        },
+        "totalDifference": {
+            "type": "number"
+        }
+      },
+      "required": ["id", "date", "totalSales", "totalTransactions", "closedAt"]
     }
   },
   "auth": {
@@ -264,10 +313,24 @@
           },
           "description": "Stores global application settings like currency, exchange rates, and profit margin."
         }
+      },
+      {
+        "path": "/daily_reconciliations/{reconciliationId}",
+        "definition": {
+            "entityName": "DailyReconciliation",
+            "schema": {
+                "$ref": "#/backend/entities/DailyReconciliation"
+            },
+            "description": "Stores records of daily sales closings.",
+            "params": [
+                {
+                    "name": "reconciliationId",
+                    "description": "Unique identifier for the reconciliation, usually the date (YYYY-MM-DD)."
+                }
+            ]
+        }
       }
     ],
     "reasoning": "Given the requirement for offline functionality, storing data directly in Firestore might not be the most suitable approach. While Firestore does offer offline persistence, managing local data synchronization and conflict resolution can become complex, especially for an application with offline-first as a core requirement.\n\nHowever, since the request explicitly asked how to store the data in Firebase, the following structure is designed with the assumption that data will be synced to Firebase when online.  A more robust offline solution would involve a local database (e.g., SQLite, Realm) with synchronization to Firestore when connectivity is available. This architecture optimizes for offline speed and reliability.\n\nHere's the structure assuming synchronization with Firestore is desired when online:\n\n1.  **Products Collection (`/products/{productId}`):**  Stores product information.  QAPs are supported because this is a flat collection with a homogeneous security posture.\n2.  **Sale Transactions Collection (`/sale_transactions/{saleTransactionId}`):** Stores sales transaction data. QAPs are supported because this is a flat collection with a homogeneous security posture.\n3.  **Repair Jobs Collection (`/repair_jobs/{repairJobId}`):** Stores repair job details. QAPs are supported because this is a flat collection with a homogeneous security posture.\n\nAuthorization Independence:\n\nThis structure promotes Authorization Independence.  While the entities do not directly depend on user roles, the flat structure allows for easier security rule definition at the collection level. In a real-world application, if role-based access were needed (e.g., only managers can create or update products), a separate collection for roles (`/roles/{userId}`) would be used.  Security rules would then check for the existence of a document in the `/roles` collection based on `request.auth.uid` to determine authorization.\n\nThe structure facilitates relatively simple security rules:\n\n*   Products: Anyone authenticated can `list` the items for a `POS` view.  Creation/Update would be restricted to specific roles.\n*   SalesTransactions: Anyone authenticated can `create`. `list` and `read` access would be restricted.\n*   RepairJobs: Anyone authenticated can `create`. `list` and `read` access would be restricted."
   }
 }
-
-    

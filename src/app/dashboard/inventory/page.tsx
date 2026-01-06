@@ -116,7 +116,7 @@ function InventoryContent() {
             return products.filter(p => p.stockLevel > 0 && p.stockLevel <= p.lowStockThreshold);
         }
         if (stockFilter === 'out') {
-            return products.filter(p => p.stockLevel === 0);
+            return products.filter(p => p.stockLevel <= 0);
         }
         return products;
     }, [products, stockFilter]);
