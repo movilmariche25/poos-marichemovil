@@ -1,0 +1,273 @@
+{
+  "entities": {
+    "Product": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Product",
+      "type": "object",
+      "description": "Represents a product in the inventory.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the product."
+        },
+        "name": {
+          "type": "string",
+          "description": "Name of the product."
+        },
+        "category": {
+          "type": "string",
+          "description": "Category of the product."
+        },
+        "sku": {
+          "type": "string",
+          "description": "Stock Keeping Unit or Barcode of the product."
+        },
+        "costPrice": {
+          "type": "number",
+          "description": "Cost price of the product."
+        },
+        "retailPrice": {
+          "type": "number",
+          "description": "Retail price of the product."
+        },
+        "promoPrice": {
+          "type": "number",
+          "description": "Promotional cash price of the product in USD."
+        },
+        "stockLevel": {
+          "type": "number",
+          "description": "Current total stock level of the product."
+        },
+        "reservedStock": {
+          "type": "number",
+          "description": "Quantity of the product reserved for repair jobs."
+        },
+        "damagedStock": {
+          "type": "number",
+          "description": "Quantity of the product that is marked as damaged or faulty."
+        },
+        "lowStockThreshold": {
+          "type": "number",
+          "description": "Threshold for low stock alerts."
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "category",
+        "sku",
+        "costPrice",
+        "retailPrice",
+        "stockLevel",
+        "lowStockThreshold"
+      ]
+    },
+    "SaleTransaction": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "SaleTransaction",
+      "type": "object",
+      "description": "Represents a sales transaction.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the sales transaction."
+        },
+        "transactionDate": {
+          "type": "string",
+          "description": "Date and time of the transaction.",
+          "format": "date-time"
+        },
+        "totalAmount": {
+          "type": "number",
+          "description": "Total amount of the transaction."
+        },
+        "paymentMethod": {
+          "type": "string",
+          "description": "Payment method used for the transaction (e.g., Cash, Credit Card)."
+        },
+        "discountAmount": {
+          "type": "number",
+          "description": "Discount applied to the transaction."
+        },
+        "taxAmount": {
+          "type": "number",
+          "description": "Tax amount included in the transaction."
+        },
+        "productIds": {
+          "type": "array",
+          "description": "References to Products. (Relationship: SaleTransaction N:N Product)",
+          "items": {
+            "type": "string"
+          }
+        },
+        "repairJobId": {
+          "type": "string",
+          "description": "Reference to RepairJob. (Relationship: RepairJob 1:1 SaleTransaction, optional)."
+        }
+      },
+      "required": [
+        "id",
+        "transactionDate",
+        "totalAmount",
+        "paymentMethod"
+      ]
+    },
+    "RepairJob": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "RepairJob",
+      "type": "object",
+      "description": "Represents a repair job.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the repair job."
+        },
+        "customerName": {
+          "type": "string",
+          "description": "Name of the customer."
+        },
+        "customerPhone": {
+          "type": "string",
+          "description": "Phone number of the customer."
+        },
+        "deviceMake": {
+          "type": "string",
+          "description": "Make of the device being repaired."
+        },
+        "deviceModel": {
+          "type": "string",
+          "description": "Model of the device being repaired."
+        },
+        "deviceImei": {
+          "type": "string",
+          "description": "IMEI or Serial number of the device being repaired."
+        },
+        "reportedIssue": {
+          "type": "string",
+          "description": "Description of the issue reported by the customer."
+        },
+        "estimatedCost": {
+          "type": "number",
+          "description": "Total estimated cost of the repair job (parts + labor)."
+        },
+        "status": {
+          "type": "string",
+          "description": "Status of the repair job (e.g., Pending, In Progress, Completed)."
+        },
+        "notes": {
+          "type": "string",
+          "description": "Internal notes about the repair job."
+        },
+        "reservedParts": {
+          "type": "array",
+          "description": "An array of parts reserved from inventory for this job.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "productId": {
+                "type": "string"
+              },
+              "productName": {
+                "type": "string"
+              },
+              "quantity": {
+                "type": "number"
+              }
+            },
+            "required": ["productId", "productName", "quantity"]
+          }
+        }
+      },
+      "required": [
+        "id",
+        "customerName",
+        "customerPhone",
+        "deviceMake",
+        "deviceModel",
+        "deviceImei",
+        "reportedIssue",
+        "estimatedCost",
+        "status"
+      ]
+    }
+  },
+  "auth": {
+    "providers": [
+      "password",
+      "anonymous"
+    ]
+  },
+  "firestore": {
+    "structure": [
+      {
+        "path": "/products/{productId}",
+        "definition": {
+          "entityName": "Product",
+          "schema": {
+            "$ref": "#/backend/entities/Product"
+          },
+          "description": "Stores product information for the inventory.",
+          "params": [
+            {
+              "name": "productId",
+              "description": "Unique identifier for the product."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/sale_transactions/{saleTransactionId}",
+        "definition": {
+          "entityName": "SaleTransaction",
+          "schema": {
+            "$ref": "#/backend/entities/SaleTransaction"
+          },
+          "description": "Stores sales transaction data.",
+          "params": [
+            {
+              "name": "saleTransactionId",
+              "description": "Unique identifier for the sales transaction."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/repair_jobs/{repairJobId}",
+        "definition": {
+          "entityName": "RepairJob",
+          "schema": {
+            "$ref": "#/backend/entities/RepairJob"
+          },
+          "description": "Stores repair job details.",
+          "params": [
+            {
+              "name": "repairJobId",
+              "description": "Unique identifier for the repair job."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/app-settings/main",
+        "definition": {
+          "entityName": "AppSettings",
+          "schema": {
+            "type": "object",
+            "properties": {
+              "currency": { "type": "string", "enum": ["USD", "Bs"] },
+              "bcvRate": { "type": "number", "description": "Tasa de cambio oficial del BCV." },
+              "parallelRate": { "type": "number", "description": "Tasa de reposición o 'paralelo'." },
+              "profitMargin": { "type": "number", "description": "Margen de ganancia en porcentaje (ej. 100 para 100%)." },
+              "lastUpdated": { "type": "string", "format": "date-time" }
+            },
+            "required": ["currency", "bcvRate", "parallelRate", "profitMargin"]
+          },
+          "description": "Stores global application settings like currency, exchange rates, and profit margin."
+        }
+      }
+    ],
+    "reasoning": "Given the requirement for offline functionality, storing data directly in Firestore might not be the most suitable approach. While Firestore does offer offline persistence, managing local data synchronization and conflict resolution can become complex, especially for an application with offline-first as a core requirement.\n\nHowever, since the request explicitly asked how to store the data in Firebase, the following structure is designed with the assumption that data will be synced to Firebase when online.  A more robust offline solution would involve a local database (e.g., SQLite, Realm) with synchronization to Firestore when connectivity is available. This architecture optimizes for offline speed and reliability.\n\nHere's the structure assuming synchronization with Firestore is desired when online:\n\n1.  **Products Collection (`/products/{productId}`):**  Stores product information.  QAPs are supported because this is a flat collection with a homogeneous security posture.\n2.  **Sale Transactions Collection (`/sale_transactions/{saleTransactionId}`):** Stores sales transaction data. QAPs are supported because this is a flat collection with a homogeneous security posture.\n3.  **Repair Jobs Collection (`/repair_jobs/{repairJobId}`):** Stores repair job details. QAPs are supported because this is a flat collection with a homogeneous security posture.\n\nAuthorization Independence:\n\nThis structure promotes Authorization Independence.  While the entities do not directly depend on user roles, the flat structure allows for easier security rule definition at the collection level. In a real-world application, if role-based access were needed (e.g., only managers can create or update products), a separate collection for roles (`/roles/{userId}`) would be used.  Security rules would then check for the existence of a document in the `/roles` collection based on `request.auth.uid` to determine authorization.\n\nThe structure facilitates relatively simple security rules:\n\n*   Products: Anyone authenticated can `list` the items for a `POS` view.  Creation/Update would be restricted to specific roles.\n*   SalesTransactions: Anyone authenticated can `create`. `list` and `read` access would be restricted.\n*   RepairJobs: Anyone authenticated can `create`. `list` and `read` access would be restricted."
+  }
+}
+
+    
