@@ -8,8 +8,15 @@ type ProductLabelProps = {
 }
 
 export function ProductLabel({ product, currency }: ProductLabelProps) {
-    const { format, getSymbol } = currency;
-    const price = product.promoPrice && product.promoPrice > 0 ? product.promoPrice : product.retailPrice;
+    const { format, getSymbol, getDynamicPrice } = currency;
+    
+    let price = product.retailPrice;
+    if (!price || price <= 0) {
+        price = getDynamicPrice(product.costPrice);
+    }
+    if (product.promoPrice && product.promoPrice > 0) {
+        price = product.promoPrice;
+    }
 
     return (
         <div className="label-container">

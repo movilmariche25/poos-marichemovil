@@ -1,4 +1,5 @@
 
+
 "use client"
 
 import type { ColumnDef } from "@tanstack/react-table"
@@ -12,7 +13,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { ArrowUpDown, MoreHorizontal, Edit, Trash2, DollarSign, Printer } from "lucide-react"
+import { ArrowUpDown, MoreHorizontal, Edit, Trash2, DollarSign, Printer, Eye } from "lucide-react"
 import { Badge } from "../ui/badge"
 import { RepairFormDialog } from "./repair-form-dialog"
 import { useToast } from "@/hooks/use-toast"
@@ -37,23 +38,30 @@ import { PayRepairButton } from "./pay-repair-button"
 import { AdminAuthDialog } from "../admin-auth-dialog"
 import { useState } from "react"
 import { cn } from "@/lib/utils"
+import { useRouter } from "next/navigation"
 
 const statusColors: Record<RepairStatus, "default" | "secondary" | "destructive" | "outline"> = {
     'Pendiente': 'destructive',
-    'Diagnóstico': 'outline',
-    'En Progreso': 'default',
-    'Esperando Piezas': 'destructive',
-    'Listo para Recoger': 'default',
     'Completado': 'secondary',
 };
 
-const repairStatuses: RepairStatus[] = ['Pendiente', 'Diagnóstico', 'En Progreso', 'Esperando Piezas', 'Listo para Recoger', 'Completado'];
+const repairStatuses: RepairStatus[] = ['Pendiente', 'Completado'];
 
 
 const ActionsCell = ({ repairJob }: { repairJob: RepairJob }) => {
     const { toast } = useToast();
     const { firestore } = useFirebase();
+    const router = useRouter();
     const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+    const estimatedCost = repairJob.estimatedCost || 0;
+    const amountPaid = repairJob.amountPaid || 0;
+    const remainingBalance = estimatedCost - amountPaid;
+    const isCompletedAndPaid = repairJob.status === 'Completado' && repairJob.isPaid;
+
+    const handlePay = () => {
+        const repairData = encodeURIComponent(JSON.stringify(repairJob));
+        router.push(`/dashboard/pos?repairJob=${repairData}`);
+    };
 
     const handleDelete = async () => {
         if (!firestore || !repairJob.id) return;
@@ -123,15 +131,23 @@ const ActionsCell = ({ repairJob }: { repairJob: RepairJob }) => {
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                     <DropdownMenuLabel>Acciones</DropdownMenuLabel>
+                    
+                    {remainingBalance > 0.001 && !repairJob.isPaid && (
+                         <DropdownMenuItem onSelect={handlePay} className="text-green-600 focus:text-green-700">
+                            <DollarSign className="mr-2 h-4 w-4" />
+                            Cobrar
+                        </DropdownMenuItem>
+                    )}
+
                     <DropdownMenuItem onSelect={onPrint}>
                         <Printer className="mr-2 h-4 w-4" />
                         Imprimir Ticket
                     </DropdownMenuItem>
                     
-                    <AdminAuthDialog onAuthorized={handleEditClick}>
+                     <AdminAuthDialog onAuthorized={handleEditClick}>
                         <DropdownMenuItem onSelect={(e) => e.preventDefault()}>
-                            <Edit className="mr-2 h-4 w-4" />
-                            Editar / Ver Detalles
+                             {isCompletedAndPaid ? <Eye className="mr-2 h-4 w-4" /> : <Edit className="mr-2 h-4 w-4" />}
+                             {isCompletedAndPaid ? 'Ver Detalles' : 'Editar / Ver Detalles'}
                         </DropdownMenuItem>
                     </AdminAuthDialog>
 
@@ -173,7 +189,7 @@ const StatusCell = ({ repairJob }: { repairJob: RepairJob }) => {
     const { firestore } = useFirebase();
 
     const handleStatusChange = (newStatus: RepairStatus) => {
-        if (!firestore || !repairJob.id) return;
+        if (!firestore || !repairJob.id || repairJob.status === 'Completado') return;
         const jobRef = doc(firestore, 'repair_jobs', repairJob.id);
 
         let updateData: Partial<RepairJob> = { status: newStatus };
@@ -200,25 +216,29 @@ const StatusCell = ({ repairJob }: { repairJob: RepairJob }) => {
 
     const status: RepairStatus = repairJob.status;
     const isPaid = repairJob.isPaid;
-    const variant = statusColors[status] || 'secondary';
     
+    let badgeVariant: "default" | "secondary" | "destructive" | "outline" = 'secondary';
     let badgeClassName = '';
-    if (status === 'Listo para Recoger' && !isPaid) {
-        badgeClassName = 'bg-yellow-500 text-black hover:bg-yellow-600';
-    } else if (status === 'Completado' && isPaid) {
-         badgeClassName = 'bg-green-500 text-white hover:bg-green-600';
-    }
 
     if (status === 'Completado') {
-        return <Badge variant={variant} className={badgeClassName}>{repairJob.status}</Badge>;
+        badgeVariant = 'secondary';
+        if (isPaid) {
+            badgeClassName = 'bg-green-500 text-white hover:bg-green-600';
+        }
+    } else { // Pendiente
+        badgeVariant = 'destructive';
+    }
+    
+    if (status === 'Completado') {
+        return <Badge variant={badgeVariant} className={cn(badgeClassName)}>{repairJob.isPaid ? 'Completado y Pagado' : 'Completado'}</Badge>;
     }
 
 
     return (
-        <Select value={repairJob.status} onValueChange={handleStatusChange}>
+        <Select value={repairJob.status} onValueChange={handleStatusChange} disabled={repairJob.status === 'Completado'}>
             <SelectTrigger className="w-48 border-0 bg-transparent shadow-none focus:ring-0">
                 <SelectValue asChild>
-                     <Badge variant={variant} className={cn(badgeClassName)}>{repairJob.status}</Badge>
+                     <Badge variant={badgeVariant} className={cn(badgeClassName, "cursor-pointer")}>{repairJob.status}</Badge>
                 </SelectValue>
             </SelectTrigger>
             <SelectContent>
@@ -292,16 +312,4 @@ export const columns: ColumnDef<RepairJob>[] = [
     id: "actions",
     cell: ({ row }) => <ActionsCell repairJob={row.original} />,
   },
-  {
-    id: 'cobrar',
-    cell: ({ row }) => {
-        const repairJob = row.original;
-        const remainingBalance = repairJob.estimatedCost - (repairJob.amountPaid || 0);
-        
-        if ((repairJob.status === 'Listo para Recoger' || repairJob.status === 'Completado') && remainingBalance > 0) {
-            return <PayRepairButton repairJob={repairJob} />;
-        }
-        return null;
-    }
-   },
 ]

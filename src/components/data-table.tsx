@@ -36,6 +36,7 @@ interface DataTableProps<TData, TValue> {
   isLoading?: boolean,
   children?: (table: Table<TData>) => React.ReactNode,
   globalFilterFn?: FilterFn<TData>,
+  meta?: any;
 }
 
 export function DataTable<TData, TValue>({
@@ -45,6 +46,7 @@ export function DataTable<TData, TValue>({
   isLoading = false,
   children,
   globalFilterFn,
+  meta
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = React.useState<SortingState>([])
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
@@ -70,6 +72,7 @@ export function DataTable<TData, TValue>({
       globalFilter,
       rowSelection,
     },
+    meta: meta // Pass meta to table instance
   })
 
   const columnCount = table.getAllColumns().length;
@@ -168,3 +171,4 @@ export function DataTable<TData, TValue>({
     </div>
   )
 }
+

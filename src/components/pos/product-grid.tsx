@@ -8,7 +8,7 @@ import { ScrollArea } from "../ui/scroll-area";
 import { useCurrency } from "@/hooks/use-currency";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "../ui/skeleton";
-import { TicketPercent, Search } from "lucide-react";
+import { TicketPercent, Search, PackagePlus } from "lucide-react";
 import { Input } from "../ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "../ui/button";
@@ -42,6 +42,21 @@ export function ProductGrid({ products, onProductSelect, isLoading }: ProductGri
             (product.compatibleModels && product.compatibleModels.some(model => model.toLowerCase().includes(searchTerm.toLowerCase()))))
     ).sort((a, b) => a.name.localeCompare(b.name));
   }, [products, activeCategory, searchTerm]);
+
+  const getAvailableStock = (product: Product) => {
+      if (product.isCombo) {
+           if (!product.comboItems || product.comboItems.length === 0) return 0;
+           const stockCounts = product.comboItems.map(item => {
+               const component = products.find(p => p.id === item.productId);
+               if (!component) return 0;
+               const available = component.stockLevel - (component.reservedStock || 0);
+               return Math.floor(available / item.quantity);
+           });
+           return Math.min(...stockCounts);
+      }
+      return product.stockLevel - (product.reservedStock || 0);
+  };
+
 
   return (
     <div className="flex flex-col h-full">
@@ -82,26 +97,28 @@ export function ProductGrid({ products, onProductSelect, isLoading }: ProductGri
                         </Card>
                     ))
                 ) : filteredProducts.map((product) => {
-                    const availableStock = product.stockLevel - (product.reservedStock || 0);
-                    const hasPromo = product.promoPrice && product.promoPrice > 0;
+                    const availableStock = getAvailableStock(product);
+                    const promoPrice = (typeof product.promoPrice === 'number' && product.promoPrice > 0) ? product.promoPrice : 0;
+                    const hasPromo = promoPrice > 0;
                     
-                    const manualOrDynamicPrice = (product.retailPrice && product.retailPrice > 0)
-                      ? product.retailPrice
-                      : getDynamicPrice(product.costPrice);
-
-                    const displayPrice = hasPromo ? product.promoPrice : manualOrDynamicPrice;
+                    const dynamicPrice = getDynamicPrice(product.costPrice);
+                    
+                    const displayPrice = hasPromo ? promoPrice : dynamicPrice;
 
                     return (
                         <Card
                             key={product.id}
-                            onClick={() => onProductSelect(product)}
+                            onClick={() => availableStock > 0 && onProductSelect(product)}
                             className={cn(
                                 "cursor-pointer hover:border-primary transition-colors flex flex-col justify-between w-[150px]",
                                 availableStock <= 0 && "opacity-50 cursor-not-allowed hover:border-input"
                             )}
                         >
                             <CardHeader className="p-2">
-                                <CardTitle className="text-sm font-medium leading-tight h-10">{product.name}</CardTitle>
+                                <CardTitle className="text-sm font-medium leading-tight h-10 flex items-start gap-2">
+                                  {product.isCombo && <PackagePlus className="h-4 w-4 text-muted-foreground flex-shrink-0 mt-0.5" title="Combo"/>}
+                                  <span>{product.name}</span>
+                                </CardTitle>
                                 {product.compatibleModels && product.compatibleModels.length > 0 && (
                                   <p className="text-xs text-muted-foreground truncate pt-1">{product.compatibleModels.join(', ')}</p>
                                 )}

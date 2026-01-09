@@ -1,7 +1,8 @@
 
+
 "use client";
 
-import type { CartItem, Payment, PaymentMethod, Sale } from "@/lib/types";
+import type { CartItem, Payment, PaymentMethod, Sale, Product } from "@/lib/types";
 import { Button } from "../ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "../ui/dialog";
 import { useState, type ReactNode, useMemo, useEffect, useCallback } from "react";
@@ -14,6 +15,7 @@ import { Label } from "../ui/label";
 
 type CheckoutDialogProps = {
   cart: CartItem[];
+  allProducts: Product[];
   total: number;
   children: ReactNode;
   onCheckout: (payments: Payment[]) => Promise<Sale | null>;
@@ -27,7 +29,7 @@ const paymentMethods: { value: PaymentMethod, label: string, icon: ReactNode }[]
     { value: 'Pago Móvil', label: 'Pago Móvil', icon: <Smartphone className="w-5 h-5"/> },
 ]
 
-export function CheckoutDialog({ cart, total, children, onCheckout, onClearCart }: CheckoutDialogProps) {
+export function CheckoutDialog({ cart, allProducts, total, children, onCheckout, onClearCart }: CheckoutDialogProps) {
   const [open, setOpen] = useState(false);
   const [completedSale, setCompletedSale] = useState<Sale | null>(null);
   const { toast } = useToast();

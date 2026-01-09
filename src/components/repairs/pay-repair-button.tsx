@@ -1,3 +1,4 @@
+
 "use client";
 
 import { Button } from "@/components/ui/button";
@@ -16,6 +17,13 @@ export function PayRepairButton({ repairJob }: PayRepairButtonProps) {
         const repairData = encodeURIComponent(JSON.stringify(repairJob));
         router.push(`/dashboard/pos?repairJob=${repairData}`);
     };
+    
+    // Safety check: Don't render the button if there is no balance remaining.
+    const remainingBalance = repairJob.estimatedCost - (repairJob.amountPaid || 0);
+    if (remainingBalance <= 0.001) {
+        return null;
+    }
+
 
     return (
         <Button onClick={handlePay} variant="outline" size="sm" className="bg-green-500 text-white hover:bg-green-600 hover:text-white">

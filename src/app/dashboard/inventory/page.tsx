@@ -110,15 +110,37 @@ function InventoryContent() {
 
     const [stockFilter, setStockFilter] = useState<StockFilter>(initialFilter);
 
+    const getAvailableStock = (product: Product, allProducts: Product[]): number => {
+        if (product.isCombo) {
+            if (!product.comboItems || product.comboItems.length === 0) return 0;
+            const stockCounts = product.comboItems.map(item => {
+                const component = allProducts.find(p => p.id === item.productId);
+                if (!component) return 0;
+                const available = component.stockLevel - (component.reservedStock || 0);
+                return Math.floor(available / item.quantity);
+            });
+            return Math.min(...stockCounts);
+        }
+        return product.stockLevel - (product.reservedStock || 0);
+    };
+
     const filteredProducts = useMemo(() => {
         if (!products) return [];
-        if (stockFilter === 'low') {
-            return products.filter(p => p.stockLevel > 0 && p.stockLevel <= p.lowStockThreshold);
+        if (stockFilter === 'all') {
+            return products;
         }
-        if (stockFilter === 'out') {
-            return products.filter(p => p.stockLevel <= 0);
-        }
-        return products;
+
+        return products.filter(p => {
+            const availableStock = getAvailableStock(p, products);
+            if (stockFilter === 'low') {
+                return availableStock > 0 && availableStock <= p.lowStockThreshold;
+            }
+            if (stockFilter === 'out') {
+                return availableStock <= 0;
+            }
+            return true;
+        });
+
     }, [products, stockFilter]);
 
     return (
@@ -155,6 +177,7 @@ function InventoryContent() {
 
                         return nameMatch || skuMatch || categoryMatch || modelMatch;
                     }}
+                    meta={{ allProducts: products || [] }} // Pass all products to meta for combo calculations
                 >
                     {(table) => (
                         <div className="flex items-center gap-2">
@@ -179,3 +202,4 @@ function Page() {
 }
 
 export default Page;
+

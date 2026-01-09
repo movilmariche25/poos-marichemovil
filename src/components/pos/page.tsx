@@ -38,7 +38,6 @@ function POSContent() {
                      const repairCartItem: CartItem = {
                         productId: job.id!,
                         name: `Reparación: ${job.deviceMake} ${job.deviceModel}`,
-                        price: remainingBalance,
                         quantity: 1,
                         isRepair: true,
                     };
@@ -103,7 +102,7 @@ function POSContent() {
                     : item
                 );
             }
-            return [...prevCart, { productId: product.id!, name: product.name, price: product.retailPrice, quantity: 1 }];
+            return [...prevCart, { productId: product.id!, name: product.name, quantity: 1 }];
         });
     };
 
@@ -132,6 +131,14 @@ function POSContent() {
         setCart(prevCart => prevCart.map(item => 
             item.productId === productId
             ? { ...item, quantity }
+            : item
+        ));
+    };
+
+    const handleUpdatePrice = (productId: string, price: number) => {
+        setCart(prevCart => prevCart.map(item => 
+            item.productId === productId
+            ? { ...item, price: price < 0 ? 0 : price, isGift: price === 0 }
             : item
         ));
     };
@@ -181,6 +188,7 @@ function POSContent() {
                     <CartDisplay 
                         cart={cart}
                         onUpdateQuantity={handleUpdateQuantity}
+                        onUpdatePrice={handleUpdatePrice}
                         onRemoveItem={handleRemoveItem}
                         onClearCart={handleClearCart}
                         repairJobId={activeRepairJob?.id}

@@ -10,7 +10,7 @@ import dynamic from "next/dynamic";
 import { useCurrency } from "@/hooks/use-currency";
 import type { Product, RepairJob, Sale } from "@/lib/types";
 import { collection } from "firebase/firestore";
-import { useMemo, useState, useEffect } from "react";
+import { useMemo } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 
 const MonthlyActivityOverview = dynamic(
@@ -49,24 +49,35 @@ export default function DashboardPage() {
     const { data: sales, isLoading: salesLoading } = useCollection<Sale>(salesCollection);
 
     const {
-        openSalesToday,
-        openSalesTotal,
+        todaySales,
         totalRevenueToday,
-        totalRevenueToClose
+        openSalesToday,
+        totalRevenueToCloseToday
     } = useMemo(() => {
-        if (!sales) return { openSalesToday: [], openSalesTotal: [], totalRevenueToday: 0, totalRevenueToClose: 0 };
+        if (!sales) return { todaySales: [], totalRevenueToday: 0, openSalesToday: [], totalRevenueToCloseToday: 0 };
         
-        const openSales = sales.filter(s => s.status !== 'refunded' && !s.reconciliationId);
         const todayStr = formatDate(new Date(), 'yyyy-MM-dd');
-        const todaySales = openSales.filter(s => formatDate(new Date(s.transactionDate), 'yyyy-MM-dd') === todayStr);
-        const totalRevenueToday = todaySales.reduce((sum, sale) => sum + sale.totalAmount, 0);
-        const totalRevenueToClose = openSales.reduce((sum, sale) => sum + sale.totalAmount, 0);
+        
+        const allSalesToday = sales.filter(s => {
+             if (!s.transactionDate) return false;
+            try {
+                // Filters for sales that occurred today, regardless of reconciliation status
+                return formatDate(new Date(s.transactionDate), 'yyyy-MM-dd') === todayStr && s.status !== 'refunded';
+            } catch (e) {
+                return false;
+            }
+        });
+        
+        const openSalesToday = allSalesToday.filter(s => !s.reconciliationId);
+
+        const totalRevenueToday = allSalesToday.reduce((sum, sale) => sum + sale.totalAmount, 0);
+        const totalRevenueToCloseToday = openSalesToday.reduce((sum, sale) => sum + sale.totalAmount, 0);
         
         return {
-            openSalesToday: todaySales,
-            openSalesTotal: openSales,
+            todaySales: allSalesToday,
             totalRevenueToday,
-            totalRevenueToClose
+            openSalesToday,
+            totalRevenueToCloseToday
         }
 
     }, [sales]);
@@ -76,7 +87,7 @@ export default function DashboardPage() {
 
     const lowStockCount = products?.filter(p => p.stockLevel > 0 && p.stockLevel <= p.lowStockThreshold).length || 0;
     
-    const openRepairs = repairJobs?.filter(r => r.status !== 'Completado' && r.status !== 'Listo para recoger').length || 0;
+    const openRepairs = repairJobs?.filter(r => r.status !== 'Completado').length || 0;
 
     return (
         <>
@@ -84,18 +95,18 @@ export default function DashboardPage() {
             <main className="flex-1 p-4 sm:p-6 space-y-6">
                 <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
                     <StatCard 
-                        title="Ventas Abiertas (Hoy)"
+                        title="Ventas de Hoy"
                         value={`${getSymbol()}${formatCurrency(totalRevenueToday)}`}
                         icon={<DollarSign className="w-4 h-4" />}
-                        description={`${openSalesToday.length} ventas hoy sin cerrar`}
+                        description={`${todaySales.length} ventas hoy`}
                         href="/dashboard/reports"
                         isLoading={isLoading}
                     />
                     <StatCard 
-                        title="Total por Cerrar"
-                        value={`${getSymbol()}${formatCurrency(totalRevenueToClose)}`}
+                        title="Ventas por Cerrar (Hoy)"
+                        value={`${getSymbol()}${formatCurrency(totalRevenueToCloseToday)}`}
                         icon={<Calculator className="w-4 h-4" />}
-                        description={`${openSalesTotal.length} ventas totales sin cerrar`}
+                        description={`${openSalesToday.length} ventas de hoy sin cerrar`}
                         href="/dashboard/reports"
                         isLoading={isLoading}
                     />
@@ -131,4 +142,3 @@ export default function DashboardPage() {
         </>
     )
 }
-

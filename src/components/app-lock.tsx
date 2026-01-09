@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState } from 'react';
@@ -25,6 +26,14 @@ export function AppLock() {
     }
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      e.stopPropagation();
+      handleUnlock();
+    }
+  }
+
   if (!isLocked) {
     return null;
   }
@@ -49,7 +58,7 @@ export function AppLock() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleUnlock()}
+              onKeyDown={handleKeyDown}
               placeholder="Contraseña"
               className="pl-10"
             />

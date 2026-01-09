@@ -2,28 +2,37 @@
 
 import type { Timestamp } from "firebase/firestore";
 
+export type ComboItem = {
+  productId: string;
+  productName: string;
+  quantity: number;
+}
+
 export type Product = {
   id?: string;
   name: string;
   category: string;
   sku: string;
   costPrice: number;
-  retailPrice?: number; // Made optional as it will be calculated dynamically
   promoPrice?: number;
   stockLevel: number;
   reservedStock: number;
   damagedStock: number;
   lowStockThreshold: number;
   compatibleModels?: string[];
+  isCombo?: boolean;
+  comboItems?: ComboItem[];
+  isGiftable?: boolean;
 };
 
 export type ReservedPart = {
   productId: string;
   productName: string;
   quantity: number;
+  costPrice: number;
 }
 
-export type RepairStatus = 'Pendiente' | 'Diagnóstico' | 'En Progreso' | 'Esperando Piezas' | 'Listo para Recoger' | 'Completado';
+export type RepairStatus = 'Pendiente' | 'Completado';
 
 export type RepairJob = {
   id?: string;
@@ -37,7 +46,9 @@ export type RepairJob = {
   devicePatternOrPassword?: string;
   reportedIssue: string;
   initialConditionsChecklist?: string[];
-  estimatedCost: number;
+  partsCost: number;
+  laborCost: number;
+  estimatedCost: number; // partsCost + laborCost
   amountPaid: number;
   isPaid: boolean;
   status: RepairStatus;
@@ -52,9 +63,9 @@ export type CartItem = {
   productId: string;
   quantity: number;
   name: string;
-  price: number;
   isRepair?: boolean;
   isPromo?: boolean;
+  isGift?: boolean;
 };
 
 export type HeldSale = {
@@ -73,7 +84,7 @@ export type Payment = {
 
 export type Sale = {
   id?: string;
-  items: CartItem[];
+  items: (CartItem & { price: number })[]; // Price is stored at checkout time
   repairJobId?: string;
   subtotal: number;
   discount: number;
@@ -117,3 +128,5 @@ export type AppSettings = {
     profitMargin: number; // Margen de Ganancia
     lastUpdated?: string; // ISO 8601 date string
 };
+
+    

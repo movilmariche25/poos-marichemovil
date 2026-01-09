@@ -1,5 +1,4 @@
 
-
 {
   "entities": {
     "Product": {
@@ -51,6 +50,27 @@
         "lowStockThreshold": {
           "type": "number",
           "description": "Threshold for low stock alerts."
+        },
+        "isCombo": {
+          "type": "boolean",
+          "description": "Whether the product is a combo/bundle of other products."
+        },
+        "comboItems": {
+            "type": "array",
+            "description": "An array of items that make up the combo.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "productId": { "type": "string" },
+                    "productName": { "type": "string" },
+                    "quantity": { "type": "number" }
+                },
+                "required": ["productId", "productName", "quantity"]
+            }
+        },
+        "isGiftable": {
+            "type": "boolean",
+            "description": "Whether the product can be given as a gift (price set to 0 in POS)."
         }
       },
       "required": [
@@ -124,63 +144,32 @@
       "type": "object",
       "description": "Represents a repair job.",
       "properties": {
-        "id": {
-          "type": "string",
-          "description": "Unique identifier for the repair job."
-        },
-        "customerName": {
-          "type": "string",
-          "description": "Name of the customer."
-        },
-        "customerPhone": {
-          "type": "string",
-          "description": "Phone number of the customer."
-        },
-        "deviceMake": {
-          "type": "string",
-          "description": "Make of the device being repaired."
-        },
-        "deviceModel": {
-          "type": "string",
-          "description": "Model of the device being repaired."
-        },
-        "deviceImei": {
-          "type": "string",
-          "description": "IMEI or Serial number of the device being repaired."
-        },
-        "reportedIssue": {
-          "type": "string",
-          "description": "Description of the issue reported by the customer."
-        },
-        "estimatedCost": {
-          "type": "number",
-          "description": "Total estimated cost of the repair job (parts + labor)."
-        },
-        "status": {
-          "type": "string",
-          "description": "Status of the repair job (e.g., Pending, In Progress, Completed)."
-        },
-        "notes": {
-          "type": "string",
-          "description": "Internal notes about the repair job."
-        },
+        "id": { "type": "string" },
+        "customerName": { "type": "string" },
+        "customerPhone": { "type": "string" },
+        "deviceMake": { "type": "string" },
+        "deviceModel": { "type": "string" },
+        "deviceImei": { "type": "string" },
+        "reportedIssue": { "type": "string" },
+        "partsCost": { "type": "number" },
+        "laborCost": { "type": "number" },
+        "estimatedCost": { "type": "number" },
+        "amountPaid": { "type": "number" },
+        "isPaid": { "type": "boolean" },
+        "status": { "type": "string" },
+        "notes": { "type": "string" },
         "reservedParts": {
           "type": "array",
           "description": "An array of parts reserved from inventory for this job.",
           "items": {
             "type": "object",
             "properties": {
-              "productId": {
-                "type": "string"
-              },
-              "productName": {
-                "type": "string"
-              },
-              "quantity": {
-                "type": "number"
-              }
+              "productId": { "type": "string" },
+              "productName": { "type": "string" },
+              "quantity": { "type": "number" },
+              "costPrice": { "type": "number" }
             },
-            "required": ["productId", "productName", "quantity"]
+            "required": ["productId", "productName", "quantity", "costPrice"]
           }
         }
       },
@@ -190,8 +179,9 @@
         "customerPhone",
         "deviceMake",
         "deviceModel",
-        "deviceImei",
         "reportedIssue",
+        "partsCost",
+        "laborCost",
         "estimatedCost",
         "status"
       ]
@@ -334,3 +324,5 @@
     "reasoning": "Given the requirement for offline functionality, storing data directly in Firestore might not be the most suitable approach. While Firestore does offer offline persistence, managing local data synchronization and conflict resolution can become complex, especially for an application with offline-first as a core requirement.\n\nHowever, since the request explicitly asked how to store the data in Firebase, the following structure is designed with the assumption that data will be synced to Firebase when online.  A more robust offline solution would involve a local database (e.g., SQLite, Realm) with synchronization to Firestore when connectivity is available. This architecture optimizes for offline speed and reliability.\n\nHere's the structure assuming synchronization with Firestore is desired when online:\n\n1.  **Products Collection (`/products/{productId}`):**  Stores product information.  QAPs are supported because this is a flat collection with a homogeneous security posture.\n2.  **Sale Transactions Collection (`/sale_transactions/{saleTransactionId}`):** Stores sales transaction data. QAPs are supported because this is a flat collection with a homogeneous security posture.\n3.  **Repair Jobs Collection (`/repair_jobs/{repairJobId}`):** Stores repair job details. QAPs are supported because this is a flat collection with a homogeneous security posture.\n\nAuthorization Independence:\n\nThis structure promotes Authorization Independence.  While the entities do not directly depend on user roles, the flat structure allows for easier security rule definition at the collection level. In a real-world application, if role-based access were needed (e.g., only managers can create or update products), a separate collection for roles (`/roles/{userId}`) would be used.  Security rules would then check for the existence of a document in the `/roles` collection based on `request.auth.uid` to determine authorization.\n\nThe structure facilitates relatively simple security rules:\n\n*   Products: Anyone authenticated can `list` the items for a `POS` view.  Creation/Update would be restricted to specific roles.\n*   SalesTransactions: Anyone authenticated can `create`. `list` and `read` access would be restricted.\n*   RepairJobs: Anyone authenticated can `create`. `list` and `read` access would be restricted."
   }
 }
+
+    

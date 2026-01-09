@@ -1,4 +1,5 @@
 
+
 "use client";
 
 import { ProductGrid } from "@/components/pos/product-grid";
@@ -23,7 +24,6 @@ function POSContent() {
     const searchParams = useSearchParams();
     const router = useRouter();
     const [cart, setCart] = useState<CartItem[]>([]);
-    const { getDynamicPrice } = useCurrency();
     
     const [activeRepairJob, setActiveRepairJob] = useState<RepairJob | null>(null);
 
@@ -42,21 +42,49 @@ function POSContent() {
     useEffect(() => {
         const repairJobData = searchParams.get('repairJob');
         const restoredSaleId = searchParams.get('restoredSaleId');
+        const restoredCartItems = searchParams.get('items');
+        const shouldClear = searchParams.get('clear') === 'true';
 
-        if (restoredSaleId && heldSales && !isUserLoading) {
-            const saleToRestore = heldSales.find(s => s.id === restoredSaleId);
-            if (saleToRestore) {
-                setCart(saleToRestore.items);
-                // Remove the restored sale
-                if(firestore) {
+        if (shouldClear) {
+            router.replace('/dashboard/pos', undefined);
+            return;
+        }
+
+        if (restoredCartItems && products && !isUserLoading) {
+            try {
+                const itemsToRestore: CartItem[] = JSON.parse(decodeURIComponent(restoredCartItems));
+                const restoredCart = itemsToRestore.map(item => {
+                    const product = products.find(p => p.id === item.productId);
+                    if (!product) return null; // Or handle as an error
+                    return {
+                        productId: product.id!,
+                        name: product.name,
+                        quantity: item.quantity,
+                        isPromo: item.isPromo,
+                        isGift: item.isGift,
+                    };
+                }).filter((item): item is CartItem => item !== null);
+
+                setCart(restoredCart);
+                
+                if (restoredSaleId && firestore) {
                     const saleRef = doc(firestore, 'held_sales', restoredSaleId);
                     deleteDocumentNonBlocking(saleRef);
                 }
-                 // Remove the router.replace to prevent the cart from being cleared
+
+                router.replace('/dashboard/pos?clear=true', undefined);
+
+
+            } catch(e) {
+                 toast({
+                    variant: "destructive",
+                    title: "Error al Restaurar",
+                    description: "No se pudo reconstruir el carrito de la venta aparcada.",
+                });
+                router.replace('/dashboard/pos', undefined);
             }
         } else if (repairJobData && !isUserLoading) {
             try {
-                // Ensure repairJobData is not empty or malformed before parsing
                 if (repairJobData) {
                     const job: RepairJob = JSON.parse(decodeURIComponent(repairJobData));
                     setActiveRepairJob(job);
@@ -66,7 +94,6 @@ function POSContent() {
                          const repairCartItem: CartItem = {
                             productId: job.id!,
                             name: `Reparación: ${job.deviceMake} ${job.deviceModel}`,
-                            price: remainingBalance,
                             quantity: 1,
                             isRepair: true,
                         };
@@ -93,11 +120,25 @@ function POSContent() {
             setActiveRepairJob(null);
         }
 
-    }, [searchParams, router, toast, isUserLoading, heldSales, firestore]);
+    }, [searchParams, router, toast, isUserLoading, heldSales, firestore, products]);
+
+    const getAvailableStock = (product: Product) => {
+        if (product.isCombo) {
+             if (!product.comboItems || product.comboItems.length === 0 || !products) return 0;
+             const stockCounts = product.comboItems.map(item => {
+                 const component = products.find(p => p.id === item.productId);
+                 if (!component) return 0;
+                 const available = component.stockLevel - (component.reservedStock || 0);
+                 return Math.floor(available / item.quantity);
+             });
+             return Math.min(...stockCounts);
+        }
+        return product.stockLevel - (product.reservedStock || 0);
+    };
 
 
     const handleProductSelect = (product: Product) => {
-        const availableStock = product.stockLevel - (product.reservedStock || 0);
+        const availableStock = getAvailableStock(product);
         if(availableStock <= 0) {
             toast({
                 variant: "destructive",
@@ -106,10 +147,6 @@ function POSContent() {
             });
             return;
         }
-
-        const salePrice = (product.retailPrice && product.retailPrice > 0)
-            ? product.retailPrice
-            : getDynamicPrice(product.costPrice);
 
         setCart(prevCart => {
             if (prevCart.some(item => item.isRepair)) {
@@ -138,7 +175,7 @@ function POSContent() {
                 );
             }
             
-            return [...prevCart, { productId: product.id!, name: product.name, price: salePrice, quantity: 1, isPromo: false }];
+            return [...prevCart, { productId: product.id!, name: product.name, quantity: 1, isPromo: false, isGift: false }];
         });
     };
 
@@ -152,10 +189,6 @@ function POSContent() {
             });
             return;
         };
-        
-        const salePrice = (product.retailPrice && product.retailPrice > 0)
-            ? product.retailPrice
-            : getDynamicPrice(product.costPrice);
 
         setCart(prevCart => prevCart.map(item => {
             if (item.productId === productId) {
@@ -163,7 +196,24 @@ function POSContent() {
                 return {
                     ...item,
                     isPromo: isPromo,
-                    price: isPromo ? product.promoPrice! : salePrice
+                    isGift: false, // Cannot be a gift and a promo at the same time
+                };
+            }
+            return item;
+        }));
+    };
+    
+    const handleToggleGift = (productId: string) => {
+        const product = products?.find(p => p.id === productId);
+        if (!product || !product.isGiftable) return;
+
+        setCart(prevCart => prevCart.map(item => {
+            if (item.productId === productId) {
+                const isGift = !item.isGift;
+                return {
+                    ...item,
+                    isGift: isGift,
+                    isPromo: false, // Cannot be a gift and a promo at the same time
                 };
             }
             return item;
@@ -182,7 +232,7 @@ function POSContent() {
             return;
         }
 
-        const availableStock = product.stockLevel - (product.reservedStock || 0);
+        const availableStock = getAvailableStock(product);
         if(quantity > availableStock) {
              toast({
                 variant: "destructive",
@@ -230,7 +280,7 @@ function POSContent() {
         if (!firestore || cart.length === 0) return;
 
         const heldSalesCol = collection(firestore, 'held_sales');
-        const newHeldSaleDocRef = doc(heldSalesCol); // Create a new doc ref with an auto-generated ID
+        const newHeldSaleDocRef = doc(heldSalesCol);
 
         const newHeldSale: HeldSale = {
             id: newHeldSaleDocRef.id,
@@ -274,6 +324,7 @@ function POSContent() {
                         onRemoveItem={handleRemoveItem}
                         onClearCart={handleClearCart}
                         onTogglePromo={handleTogglePromo}
+                        onToggleGift={handleToggleGift}
                         repairJobId={activeRepairJob?.id}
                     />
                 </div>

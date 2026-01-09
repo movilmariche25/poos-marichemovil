@@ -1,17 +1,18 @@
 
+
 "use client";
 
 import type { CartItem, Payment, Product, Sale } from "@/lib/types";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
-import { Trash2, TicketPercent } from "lucide-react";
+import { Trash2, TicketPercent, Gift } from "lucide-react";
 import { useState } from "react";
 import { CheckoutDialog } from "./checkout-dialog";
 import { useCurrency } from "@/hooks/use-currency";
 import { useRouter } from "next/navigation";
 import { ScrollArea } from "../ui/scroll-area";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
-import { useFirebase } from "@/firebase";
+import { useFirebase, setDocumentNonBlocking } from "@/firebase";
 import { collection, doc, getDoc, writeBatch } from "firebase/firestore";
 import { useToast } from "@/hooks/use-toast";
 import { format } from 'date-fns';
@@ -24,6 +25,7 @@ type CartDisplayProps = {
   onRemoveItem: (productId: string) => void;
   onClearCart: () => void;
   onTogglePromo: (productId: string) => void;
+  onToggleGift: (productId: string) => void;
   repairJobId?: string;
 };
 
@@ -34,14 +36,57 @@ function generateSaleId() {
     return `S-${datePart}-${randomPart}`;
 }
 
-export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem, onClearCart, onTogglePromo, repairJobId }: CartDisplayProps) {
+export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem, onClearCart, repairJobId, onTogglePromo, onToggleGift }: CartDisplayProps) {
   const { firestore } = useFirebase();
   const { toast } = useToast();
   const router = useRouter();
-  const { format: formatCurrency, convert, currency, bsExchangeRate, isLoading: currencyIsLoading } = useCurrency();
+  const { format: formatCurrency, convert, getDynamicPrice } = useCurrency();
   const [discount, setDiscount] = useState(0);
 
-  const subtotal = cart.reduce((acc, item) => acc + item.price * item.quantity, 0);
+  const getPrice = (item: CartItem) => {
+    if (item.isGift) return 0;
+    if (item.isRepair) return 0; // Special case for repairs, their price is fixed. Let's find it.
+    
+    const product = allProducts.find(p => p.id === item.productId);
+    if (!product) return 0;
+    
+    if (item.isPromo && product.promoPrice && product.promoPrice > 0) {
+        return product.promoPrice;
+    }
+
+    // This logic seems incorrect, retailPrice is dynamic
+    // if (product.retailPrice && product.retailPrice > 0) {
+    //     return product.retailPrice;
+    // }
+    
+    return getDynamicPrice(product.costPrice);
+  };
+  
+  // For repairs, price is pre-determined and stored in the first cart item.
+  const repairPrice = cart.find(item => item.isRepair)?.name.includes('Reparación')
+    ? (allProducts.find(p => p.id === cart.find(item => item.isRepair)!.productId) ? 0 : parseFloat(cart.find(item => item.isRepair)!.name.split('$')[1] || '0'))
+    : 0;
+
+  if(cart.find(item => item.isRepair)) {
+     const repairItem = cart.find(item => item.isRepair);
+     const job = allProducts.find(p => p.id === repairItem?.productId);
+     if(job) {
+        // This is a placeholder, need to figure out how to get the price of a repair job
+     }
+  }
+
+
+  const subtotal = cart.reduce((acc, item) => {
+      if (item.isRepair) {
+           const repairJobStr = new URLSearchParams(window.location.search).get('repairJob');
+           if (!repairJobStr) return acc;
+           const repairJob = JSON.parse(decodeURIComponent(repairJobStr));
+           const remainingBalance = repairJob.estimatedCost - (repairJob.amountPaid || 0);
+          return acc + remainingBalance * item.quantity;
+      }
+      return acc + getPrice(item) * item.quantity;
+  }, 0);
+
   const total = subtotal - discount;
 
 
@@ -50,56 +95,71 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
 
       const batch = writeBatch(firestore);
 
-      // Handle stock for regular product sales
-      for (const item of cart) {
-        if (!item.isRepair && item.productId) {
+      const cartWithFinalPrices = cart.map(item => ({
+        ...item,
+        price: getPrice(item)
+      }));
+
+      for (const item of cartWithFinalPrices) {
           const product = allProducts.find(p => p.id === item.productId);
-          if (product) {
-            const productRef = doc(firestore, 'products', item.productId);
-            const newStock = product.stockLevel - item.quantity;
-            batch.update(productRef, { stockLevel: newStock });
+          if (!product) continue;
+          
+          if (!item.isRepair) {
+              if (product.isCombo && product.comboItems) {
+                  for (const comboItem of product.comboItems) {
+                      const componentProductRef = doc(firestore, 'products', comboItem.productId);
+                      const componentProductDoc = await getDoc(componentProductRef);
+                      if (componentProductDoc.exists()) {
+                          const componentProductData = componentProductDoc.data();
+                          const newStock = componentProductData.stockLevel - (comboItem.quantity * item.quantity);
+                          batch.update(componentProductRef, { stockLevel: newStock });
+                      }
+                  }
+              } else if (!product.isCombo) {
+                  const productRef = doc(firestore, 'products', item.productId);
+                  const newStock = product.stockLevel - item.quantity;
+                  batch.update(productRef, { stockLevel: newStock });
+              }
           }
-        }
       }
       
-      // Handle repair job completion
       if (repairJobId) {
         const repairJobRef = doc(firestore, 'repair_jobs', repairJobId);
         const repairJobDoc = await getDoc(repairJobRef);
         const repairJobData = repairJobDoc.data();
         
-        // Finalize stock for reserved parts
-        if (repairJobData && repairJobData.reservedParts && repairJobData.reservedParts.length > 0) {
-            for (const part of repairJobData.reservedParts) {
-                const productRef = doc(firestore, 'products', part.productId);
-                const productDoc = await getDoc(productRef);
-                if (productDoc.exists()) {
-                    const productData = productDoc.data();
-                    const newReservedStock = (productData.reservedStock || 0) - part.quantity;
-                    const newStockLevel = productData.stockLevel - part.quantity; // Decrease total stock upon sale completion
-                    batch.update(productRef, { 
-                        stockLevel: newStockLevel < 0 ? 0 : newStockLevel,
-                        reservedStock: newReservedStock < 0 ? 0 : newReservedStock 
-                    });
+        if (repairJobData) {
+            if (repairJobData.reservedParts && repairJobData.reservedParts.length > 0) {
+                for (const part of repairJobData.reservedParts) {
+                    const productRef = doc(firestore, 'products', part.productId);
+                    const productDoc = await getDoc(productRef);
+                    if (productDoc.exists()) {
+                        const productData = productDoc.data();
+                        const newReservedStock = (productData.reservedStock || 0) - part.quantity;
+                        batch.update(productRef, { 
+                            reservedStock: newReservedStock < 0 ? 0 : newReservedStock 
+                        });
+                    }
                 }
             }
-        }
-        
-        const currentAmountPaid = repairJobData?.amountPaid || 0;
-        const totalPaidForRepairThisTransaction = cart.reduce((acc, item) => acc + (item.price * item.quantity), 0);
-        const newTotalPaid = currentAmountPaid + totalPaidForRepairThisTransaction;
+            
+            const currentAmountPaid = repairJobData.amountPaid || 0;
+            // The total for this transaction is `total`, which already includes discounts.
+            const newTotalPaid = currentAmountPaid + total;
 
-        batch.update(repairJobRef, { 
-            status: 'Completado', 
-            amountPaid: newTotalPaid,
-            isPaid: true,
-            reservedParts: [] // Clear reserved parts after completion
-        });
+            const isNowPaidInFull = newTotalPaid >= repairJobData.estimatedCost;
+
+            batch.set(repairJobRef, { 
+                status: 'Completado', 
+                amountPaid: newTotalPaid,
+                isPaid: isNowPaidInFull, // Explicitly set isPaid based on the new total
+            }, { merge: true });
+        }
       }
       
       const saleId = generateSaleId();
-      const saleDataObject: Omit<Sale, 'id' | 'status'> = {
-          items: cart,
+      const saleDataObject: Omit<Sale, 'id' | 'status' | 'items'> & { items: (CartItem & { price: number })[] } = {
+          items: cartWithFinalPrices,
           subtotal: subtotal,
           discount: discount,
           totalAmount: total,
@@ -151,24 +211,32 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
                 ) : (
                     cart.map((item) => {
                         const product = allProducts.find(p => p.id === item.productId);
-                        const hasPromo = product && product.promoPrice && product.promoPrice > 0;
-                        const priceInBs = convert(item.price, 'USD', 'Bs');
+                        let itemPrice = 0;
+                        if (item.isRepair) {
+                            const repairJobStr = new URLSearchParams(window.location.search).get('repairJob');
+                            if (repairJobStr) {
+                                const repairJob = JSON.parse(decodeURIComponent(repairJobStr));
+                                const remainingBalance = repairJob.estimatedCost - (repairJob.amountPaid || 0);
+                                itemPrice = remainingBalance;
+                            }
+                        } else {
+                            itemPrice = getPrice(item);
+                        }
+
+                        const totalItemPrice = itemPrice * item.quantity;
+                        const totalItemPriceBs = convert(totalItemPrice, 'USD', 'Bs');
+                        
                         return (
-                        <TableRow key={item.productId}>
-                            <TableCell className="font-medium flex items-center gap-2">
-                                <Button 
-                                    variant="ghost" 
-                                    size="icon" 
-                                    className={cn(
-                                        "w-6 h-6",
-                                        !hasPromo && "opacity-25 cursor-default hover:bg-transparent",
-                                        item.isPromo && "text-green-600"
+                        <TableRow key={item.productId} className={cn(item.isGift && "bg-green-50")}>
+                            <TableCell className="font-medium">
+                                <div className="flex items-center gap-2">
+                                     {product?.isGiftable && !item.isRepair && (
+                                        <Button variant="ghost" size="icon" className="w-6 h-6" onClick={() => onToggleGift(item.productId)}>
+                                            <Gift className={cn("w-4 h-4", item.isGift ? "text-green-600" : "text-muted-foreground")} />
+                                        </Button>
                                     )}
-                                    onClick={() => hasPromo && onTogglePromo(item.productId)}
-                                >
-                                    <TicketPercent className="w-4 h-4" />
-                                </Button>
-                                {item.name}
+                                    <span>{item.name}</span>
+                                </div>
                             </TableCell>
                             <TableCell className="text-center">
                                 <Input 
@@ -180,12 +248,18 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
                                 />
                             </TableCell>
                             <TableCell className="text-right">
-                                <div className={cn("font-medium", item.isPromo && "text-green-600")}>${formatCurrency(item.price)}</div>
-                                <div className="text-xs text-muted-foreground">Bs {formatCurrency(priceInBs, 'Bs')}</div>
+                               <div className="flex items-center justify-end gap-1">
+                                    {product?.promoPrice && product.promoPrice > 0 && !item.isRepair && (
+                                        <Button variant="ghost" size="icon" className="w-6 h-6" onClick={() => onTogglePromo(item.productId)}>
+                                            <TicketPercent className={cn("w-4 h-4", item.isPromo ? "text-green-600" : "text-muted-foreground")} />
+                                        </Button>
+                                    )}
+                                    <span>${formatCurrency(itemPrice)}</span>
+                               </div>
                             </TableCell>
                             <TableCell className="text-right">
-                                <div className="font-medium">${formatCurrency(item.price * item.quantity)}</div>
-                                <div className="text-xs text-muted-foreground">Bs {formatCurrency(priceInBs * item.quantity, 'Bs')}</div>
+                                <div className="font-medium">${formatCurrency(totalItemPrice)}</div>
+                                <div className="text-xs text-muted-foreground">Bs {formatCurrency(totalItemPriceBs, 'Bs')}</div>
                             </TableCell>
                             <TableCell>
                                <Button variant="ghost" size="icon" className="w-6 h-6" onClick={() => onRemoveItem(item.productId)} disabled={item.isRepair}>
@@ -217,7 +291,7 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
                 placeholder="0.00"
             />
         </div>
-        <CheckoutDialog cart={cart} total={total} onCheckout={handleCheckout} onClearCart={onClearCart}>
+        <CheckoutDialog cart={cart} allProducts={allProducts} total={total} onCheckout={handleCheckout} onClearCart={onClearCart}>
             <Button size="lg" disabled={cart.length === 0} className="w-full h-16 text-xl flex flex-col items-center">
                 <span className="text-2xl font-bold">PAGAR: ${formatCurrency(total)}</span>
                 <span className="text-sm font-normal text-primary-foreground/80">
@@ -229,5 +303,3 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
     </div>
   );
 }
-
-    

@@ -10,6 +10,7 @@ import {
   ShoppingCart,
   BarChart2,
   Settings,
+  TrendingUp,
 } from 'lucide-react';
 import {
   Sidebar,
@@ -31,6 +32,7 @@ const navItems = [
   { href: '/dashboard/repairs', icon: Wrench, label: 'Reparaciones' },
   { href: '/dashboard/pos', icon: ShoppingCart, label: 'Punto de Venta' },
   { href: '/dashboard/reports', icon: BarChart2, label: 'Reportes' },
+  { href: '/dashboard/analysis', icon: TrendingUp, label: 'Análisis' },
 ];
 
 export function SidebarNav() {

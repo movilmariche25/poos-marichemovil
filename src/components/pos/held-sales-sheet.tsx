@@ -40,9 +40,11 @@ export function HeldSalesSheet({ heldSales }: HeldSalesSheetProps) {
     const { firestore } = useFirebase();
     const router = useRouter();
 
-    const handleRestoreSale = (saleId: string) => {
-        router.push(`/dashboard/pos?restoredSaleId=${saleId}`);
-        // The sheet will close automatically due to navigation
+    const handleRestoreSale = (sale: HeldSale) => {
+        // We pass the items as a URL parameter to be reconstructed on the POS page.
+        // This ensures the prices are fresh.
+        const itemsParam = encodeURIComponent(JSON.stringify(sale.items));
+        router.push(`/dashboard/pos?restoredSaleId=${sale.id}&items=${itemsParam}`);
     };
     
     const handleDeleteSale = (saleId: string) => {
@@ -102,7 +104,7 @@ export function HeldSalesSheet({ heldSales }: HeldSalesSheetProps) {
                             </AlertDialog>
 
                              <SheetClose asChild>
-                                <Button variant="outline" size="sm" onClick={() => handleRestoreSale(sale.id)}>
+                                <Button variant="outline" size="sm" onClick={() => handleRestoreSale(sale)}>
                                     Restaurar <ArrowRight className="ml-2 h-4 w-4" />
                                 </Button>
                              </SheetClose>

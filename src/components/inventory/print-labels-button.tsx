@@ -91,7 +91,6 @@ export const handlePrint = (
                     window.onload = function() {
                         setTimeout(function() {
                             window.print();
-                           // window.close();
                         }, 100);
                     }
                 <\/script>

@@ -35,7 +35,7 @@ export function ExchangeRateReminder() {
         )
     }
 
-    if (!settings || !settings.lastUpdated) {
+    if (!settings || !settings.lastUpdated || hoursSinceUpdate === Infinity) {
         // If settings are not loaded or never updated, show a default alert
          return (
             <div className="p-4 border-b">

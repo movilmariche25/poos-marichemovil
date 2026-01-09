@@ -33,8 +33,19 @@ export default function RepairsPage() {
                     columns={columns} 
                     data={repairJobs || []}
                     isLoading={isLoading}
-                    filterColumnId="customerName"
-                    filterPlaceholder="Filtrar por nombre de cliente..."
+                    filterPlaceholder="Buscar por cliente, teléfono, ID, dispositivo, IMEI..."
+                    globalFilterFn={(row, columnId, filterValue) => {
+                        const job = row.original;
+                        const searchTerm = filterValue.toLowerCase();
+                        
+                        const nameMatch = job.customerName.toLowerCase().includes(searchTerm);
+                        const phoneMatch = job.customerPhone.toLowerCase().includes(searchTerm);
+                        const idMatch = job.id?.toLowerCase().includes(searchTerm);
+                        const deviceMatch = `${job.deviceMake} ${job.deviceModel}`.toLowerCase().includes(searchTerm);
+                        const imeiMatch = job.deviceImei?.toLowerCase().includes(searchTerm);
+
+                        return nameMatch || phoneMatch || idMatch || deviceMatch || imeiMatch;
+                    }}
                 />
             </main>
         </>

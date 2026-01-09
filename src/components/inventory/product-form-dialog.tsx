@@ -2,7 +2,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useForm } from "react-hook-form";
+import { useForm, useFieldArray } from "react-hook-form";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import {
@@ -24,29 +24,39 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import type { Product } from "@/lib/types";
-import { useState, type ReactNode, useEffect } from "react";
+import type { Product, ComboItem } from "@/lib/types";
+import { useState, type ReactNode, useEffect, useMemo } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { useFirebase, setDocumentNonBlocking, addDocumentNonBlocking } from "@/firebase";
+import { useFirebase, setDocumentNonBlocking, addDocumentNonBlocking, useCollection, useMemoFirebase } from "@/firebase";
 import { collection, doc } from "firebase/firestore";
 import { Checkbox } from "../ui/checkbox";
 import { Textarea } from "../ui/textarea";
 import { useCurrency } from "@/hooks/use-currency";
 import { Separator } from "../ui/separator";
-import { Info } from "lucide-react";
+import { Info, PackagePlus, Search, Trash2 } from "lucide-react";
 import { format } from "date-fns";
+import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "../ui/command";
+
+const comboItemSchema = z.object({
+  productId: z.string(),
+  productName: z.string(),
+  quantity: z.coerce.number().min(1, "La cantidad debe ser al menos 1."),
+});
 
 const formSchema = z.object({
   name: z.string().min(2, { message: "El nombre debe tener al menos 2 caracteres." }),
   category: z.string().min(2, { message: "La categoría es obligatoria." }),
   sku: z.string(),
   costPrice: z.coerce.number().min(0, { message: "El precio de costo debe ser positivo." }),
-  retailPrice: z.coerce.number().optional(), // Campo para anulación manual
   hasPromoPrice: z.boolean().optional(),
   promoPrice: z.coerce.number().optional(),
   stockLevel: z.coerce.number().int({ message: "El stock debe ser un número entero." }).min(0, "El stock no puede ser negativo."),
   lowStockThreshold: z.coerce.number().int({ message: "El umbral debe ser un número entero." }).min(1, "La alerta debe ser al menos 1."),
   compatibleModels: z.string().optional(),
+  isCombo: z.boolean().optional(),
+  comboItems: z.array(comboItemSchema).optional(),
+  isGiftable: z.boolean().optional(),
 });
 
 type ProductFormData = z.infer<typeof formSchema>;
@@ -66,8 +76,12 @@ function generateSku() {
 export function ProductFormDialog({ product, children, productCount = 0 }: ProductFormDialogProps) {
   const { firestore } = useFirebase();
   const [open, setOpen] = useState(false);
+  const [partsPopoverOpen, setPartsPopoverOpen] = useState(false);
   const { toast } = useToast();
   const { getDynamicPrice, convert, format: formatCurrency, getSymbol, profitMargin } = useCurrency();
+
+  const productsCollection = useMemoFirebase(() => firestore ? collection(firestore, 'products') : null, [firestore]);
+  const { data: allProducts } = useCollection<Product>(productsCollection);
 
   const form = useForm<ProductFormData>({
     resolver: zodResolver(formSchema),
@@ -76,18 +90,42 @@ export function ProductFormDialog({ product, children, productCount = 0 }: Produ
       category: "",
       sku: "",
       costPrice: 0,
-      retailPrice: 0,
       hasPromoPrice: false,
       promoPrice: 0,
       stockLevel: 1,
       lowStockThreshold: 1,
       compatibleModels: "",
+      isCombo: false,
+      comboItems: [],
+      isGiftable: false,
     },
+  });
+
+  const { fields, append, remove } = useFieldArray({
+    control: form.control,
+    name: "comboItems",
   });
 
   const costPrice = form.watch("costPrice");
   const hasPromo = form.watch("hasPromoPrice");
+  const isCombo = form.watch("isCombo");
+  const comboItems = form.watch("comboItems");
   const isEditing = !!product;
+  
+  const comboCost = useMemo(() => {
+    if (!isCombo || !comboItems || !allProducts) return 0;
+    return comboItems.reduce((total, item) => {
+        const productComponent = allProducts.find(p => p.id === item.productId);
+        return total + (productComponent ? productComponent.costPrice * item.quantity : 0);
+    }, 0);
+  }, [isCombo, comboItems, allProducts]);
+  
+  useEffect(() => {
+    if (isCombo) {
+        form.setValue("costPrice", comboCost, { shouldValidate: true });
+    }
+  }, [isCombo, comboCost, form]);
+
 
   const calculatedRetailPrice = getDynamicPrice(costPrice);
   const calculatedRetailPriceBs = convert(calculatedRetailPrice, 'USD', 'Bs');
@@ -108,7 +146,9 @@ export function ProductFormDialog({ product, children, productCount = 0 }: Produ
               compatibleModels: product.compatibleModels ? product.compatibleModels.join(", ") : "",
               hasPromoPrice: product.promoPrice && product.promoPrice > 0,
               promoPrice: product.promoPrice || 0,
-              retailPrice: product.retailPrice || 0,
+              isCombo: product.isCombo || false,
+              comboItems: product.comboItems || [],
+              isGiftable: product.isGiftable || false,
             });
         } else {
             form.reset({
@@ -116,12 +156,14 @@ export function ProductFormDialog({ product, children, productCount = 0 }: Produ
                 category: "",
                 sku: generateSku(),
                 costPrice: 0,
-                retailPrice: 0,
                 hasPromoPrice: false,
                 promoPrice: 0,
                 stockLevel: 1,
                 lowStockThreshold: 1,
                 compatibleModels: "",
+                isCombo: false,
+                comboItems: [],
+                isGiftable: false,
             });
         }
     }
@@ -131,21 +173,31 @@ export function ProductFormDialog({ product, children, productCount = 0 }: Produ
   async function onSubmit(values: ProductFormData) {
     if (!firestore) return;
 
+    if (values.isCombo && (!values.comboItems || values.comboItems.length === 0)) {
+        toast({
+            variant: "destructive",
+            title: "Error en Combo",
+            description: "Un combo debe tener al menos un producto componente."
+        });
+        return;
+    }
+    
     const compatibleModelsArray = values.compatibleModels 
       ? values.compatibleModels.split(',').map(s => s.trim()).filter(Boolean)
       : [];
       
     const { hasPromoPrice, ...restOfValues } = values;
 
-    const finalValues: Omit<Product, 'id'> = {
+    const finalValues: Omit<Product, 'id' | 'retailPrice'> = {
         ...restOfValues,
         compatibleModels: compatibleModelsArray,
         promoPrice: hasPromoPrice ? values.promoPrice : 0,
-        // Si retailPrice es 0 o nulo, se guarda como 0 para indicar que se debe usar el cálculo dinámico
-        retailPrice: values.retailPrice || 0,
         reservedStock: product?.reservedStock || 0,
         damagedStock: product?.damagedStock || 0,
-    }
+        comboItems: values.isCombo ? values.comboItems : [],
+        costPrice: values.isCombo ? comboCost : values.costPrice,
+        isGiftable: values.isGiftable || false,
+    };
 
     if (product && product.id) {
       const productRef = doc(firestore, 'products', product.id);
@@ -153,11 +205,8 @@ export function ProductFormDialog({ product, children, productCount = 0 }: Produ
       toast({ title: "Producto Actualizado", description: `${values.name} ha sido actualizado.` });
     } else {
       const productsCollection = collection(firestore, 'products');
-      const newDocRef = await addDocumentNonBlocking(productsCollection, finalValues);
-      if(newDocRef) {
-        // Optionally update the new document with its own ID
-        setDocumentNonBlocking(newDocRef, { id: newDocRef.id }, { merge: true });
-      }
+      const newDocRef = doc(productsCollection);
+      setDocumentNonBlocking(newDocRef, { ...finalValues, id: newDocRef.id });
       toast({ title: "Producto Añadido", description: `${values.name} ha sido añadido al inventario.` });
     }
     setOpen(false);
@@ -175,7 +224,15 @@ export function ProductFormDialog({ product, children, productCount = 0 }: Produ
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 py-4 max-h-[70vh] overflow-y-auto pr-4">
+          <form 
+            onSubmit={form.handleSubmit(onSubmit)} 
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.target as HTMLElement).tagName !== 'TEXTAREA') {
+                e.preventDefault();
+              }
+            }}
+            className="space-y-4 py-4 max-h-[70vh] overflow-y-auto pr-4"
+          >
             <FormField
               control={form.control}
               name="name"
@@ -231,6 +288,102 @@ export function ProductFormDialog({ product, children, productCount = 0 }: Produ
                 )}
               />
             </div>
+
+            <Separator />
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pt-2">
+                <FormField
+                    control={form.control}
+                    name="isCombo"
+                    render={({ field }) => (
+                        <FormItem className="flex flex-row items-center space-x-2 space-y-0">
+                            <FormControl>
+                                <Checkbox
+                                    checked={field.value}
+                                    onCheckedChange={field.onChange}
+                                />
+                            </FormControl>
+                            <FormLabel className="font-normal cursor-pointer">
+                                Es un Combo/Paquete
+                            </FormLabel>
+                        </FormItem>
+                    )}
+                />
+                <FormField
+                    control={form.control}
+                    name="isGiftable"
+                    render={({ field }) => (
+                        <FormItem className="flex flex-row items-center space-x-2 space-y-0">
+                            <FormControl>
+                                <Checkbox
+                                    checked={field.value}
+                                    onCheckedChange={field.onChange}
+                                />
+                            </FormControl>
+                            <FormLabel className="font-normal cursor-pointer">
+                                Puede ser obsequiado
+                            </FormLabel>
+                        </FormItem>
+                    )}
+                />
+            </div>
+
+            {isCombo ? (
+                 <div className="space-y-4 p-3 border rounded-md">
+                    <legend className="text-sm font-medium -mt-1 mb-2">Componentes del Combo</legend>
+                    <div className="space-y-2">
+                        {fields.map((field, index) => (
+                            <div key={field.id} className="flex items-center gap-2 p-2 border rounded-md bg-muted/50">
+                                <span className="flex-1 text-sm">{field.productName}</span>
+                                <Input 
+                                    type="number" 
+                                    {...form.register(`comboItems.${index}.quantity` as const)}
+                                    className="w-20 h-8"
+                                />
+                                <Button type="button" variant="ghost" size="icon" className="w-8 h-8" onClick={() => remove(index)}>
+                                    <Trash2 className="w-4 h-4 text-destructive" />
+                                </Button>
+                            </div>
+                        ))}
+                        <Popover open={partsPopoverOpen} onOpenChange={setPartsPopoverOpen}>
+                            <PopoverTrigger asChild>
+                                <Button type="button" variant="outline" className="w-full">
+                                    <Search className="mr-2 h-4 w-4" /> Añadir Producto al Combo
+                                </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-[300px] p-0">
+                                <Command>
+                                    <CommandInput placeholder="Buscar producto..." />
+                                    <CommandList>
+                                    <CommandEmpty>No se encontraron productos.</CommandEmpty>
+                                    <CommandGroup>
+                                        {(allProducts || []).filter(p => !p.isCombo).map((product) => (
+                                            <CommandItem
+                                                key={product.id}
+                                                value={product.name}
+                                                onSelect={() => {
+                                                    if (!fields.some(f => f.productId === product.id)) {
+                                                        append({ productId: product.id!, productName: product.name, quantity: 1 });
+                                                    } else {
+                                                        toast({ variant: 'destructive', title: 'Producto ya añadido' })
+                                                    }
+                                                    setPartsPopoverOpen(false);
+                                                }}
+                                                disabled={fields.some(f => f.productId === product.id)}
+                                                className="flex justify-between"
+                                            >
+                                                <span>{product.name}</span>
+                                            </CommandItem>
+                                        ))}
+                                    </CommandGroup>
+                                    </CommandList>
+                                </Command>
+                            </PopoverContent>
+                        </Popover>
+                    </div>
+                </div>
+            ) : null}
+
+
             <div className="space-y-4 p-3 border rounded-md">
                 <FormField
                     control={form.control}
@@ -244,6 +397,7 @@ export function ProductFormDialog({ product, children, productCount = 0 }: Produ
                             inputMode="decimal"
                             placeholder="0.00"
                             {...field}
+                            disabled={isCombo}
                              onChange={e => {
                                 const value = e.target.value;
                                 const regex = /^[0-9]*\.?[0-9]{0,2}$/;
@@ -253,7 +407,7 @@ export function ProductFormDialog({ product, children, productCount = 0 }: Produ
                             }}
                         />
                         </FormControl>
-                        <FormDescription>Este es el costo base para los cálculos de precios.</FormDescription>
+                        <FormDescription>{isCombo ? "Costo calculado de los componentes." : "Este es el costo base para los cálculos de precios."}</FormDescription>
                         <FormMessage />
                     </FormItem>
                     )}
@@ -272,27 +426,6 @@ export function ProductFormDialog({ product, children, productCount = 0 }: Produ
                         <span className="font-bold">{getSymbol('Bs')}{formatCurrency(calculatedRetailPriceBs, 'Bs')}</span>
                     </div>
                 </div>
-
-                <Separator />
-                 <FormField
-                    control={form.control}
-                    name="retailPrice"
-                    render={({ field }) => (
-                    <FormItem>
-                        <FormLabel>Precio de Venta Manual ($)</FormLabel>
-                        <FormControl>
-                        <Input 
-                            type="text"
-                            inputMode="decimal"
-                            placeholder="0.00"
-                            {...field}
-                        />
-                        </FormControl>
-                        <FormDescription>Opcional. Anula el precio dinámico si es mayor a 0.</FormDescription>
-                        <FormMessage />
-                    </FormItem>
-                    )}
-                />
 
                 <Separator />
                 
@@ -344,8 +477,9 @@ export function ProductFormDialog({ product, children, productCount = 0 }: Produ
                   <FormItem>
                     <FormLabel>Stock Actual</FormLabel>
                     <FormControl>
-                      <Input type="number" {...field} />
+                      <Input type="number" {...field} disabled={isCombo}/>
                     </FormControl>
+                    {isCombo && <FormDescription>El stock de un combo se basa en sus componentes.</FormDescription>}
                     <FormMessage />
                   </FormItem>
                 )}
@@ -373,3 +507,5 @@ export function ProductFormDialog({ product, children, productCount = 0 }: Produ
     </Dialog>
   );
 }
+
+    

@@ -1,7 +1,8 @@
 
+
 "use client"
 
-import type { Sale, Payment, Product } from "@/lib/types";
+import type { Sale, Payment, Product, CartItem } from "@/lib/types";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { format, parseISO } from "date-fns";
 import { es } from "date-fns/locale";

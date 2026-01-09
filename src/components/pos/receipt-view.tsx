@@ -1,6 +1,7 @@
+
 "use client";
 
-import type { Sale, Payment } from "@/lib/types";
+import type { Sale, Payment, CartItem } from "@/lib/types";
 import { format, parseISO } from "date-fns";
 import { es } from "date-fns/locale";
 import { Separator } from "../ui/separator";
@@ -107,7 +108,7 @@ export const handlePrintReceipt = (props: ReceiptViewProps, onError: (message: s
                 <body>
                     <div class="receipt-container">${receiptHtml}</div>
                     <script>
-                        window.onload = function() { window.print(); window.close(); }
+                        window.onload = function() { window.print(); }
                     <\/script>
                 </body>
             </html>

@@ -113,7 +113,7 @@ export const handlePrintTicket = (props: RepairTicketProps, onError: (message: s
                 <body>
                     <div class="ticket-container">${ticketHtml}</div>
                     <script>
-                        window.onload = function() { window.print(); window.close(); }
+                        window.onload = function() { window.print(); }
                     <\/script>
                 </body>
             </html>

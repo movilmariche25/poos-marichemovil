@@ -12,7 +12,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { ArrowUpDown, MoreHorizontal, Edit, Trash2, TicketPercent } from "lucide-react"
+import { ArrowUpDown, MoreHorizontal, Edit, Trash2, TicketPercent, PackagePlus } from "lucide-react"
 import { Badge } from "../ui/badge"
 import { ProductFormDialog } from "./product-form-dialog"
 import { useToast } from "@/hooks/use-toast"
@@ -70,14 +70,14 @@ const ActionsCell = ({ product }: { product: Product }) => {
                 <DropdownMenuContent align="end">
                     <DropdownMenuLabel>Acciones</DropdownMenuLabel>
                     <AdminAuthDialog onAuthorized={handleTriggerEdit}>
-                        <DropdownMenuItem onSelect={(e) => e.preventDefault()}>
+                        <DropdownMenuItem onSelect={(e) => { e.preventDefault(); }}>
                             <Edit className="mr-2 h-4 w-4" />
                             Editar
                         </DropdownMenuItem>
                     </AdminAuthDialog>
                     <DropdownMenuSeparator />
                     <AdminAuthDialog onAuthorized={() => setIsDeleteDialogOpen(true)}>
-                        <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={(e) => e.preventDefault()}>
+                        <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={(e) => { e.preventDefault(); }}>
                             <Trash2 className="mr-2 h-4 w-4" />
                             Eliminar
                         </DropdownMenuItem>
@@ -156,7 +156,10 @@ export const columns: ColumnDef<Product>[] = [
         const compatibleModels = product.compatibleModels || [];
         return (
             <div className="max-w-xs">
-                <div className="font-medium">{product.name}</div>
+                <div className="font-medium flex items-center gap-2">
+                    {product.name}
+                    {product.isCombo && <PackagePlus className="h-4 w-4 text-muted-foreground" title="Combo" />}
+                </div>
                 {compatibleModels.length > 0 && (
                     <div className="text-xs text-muted-foreground truncate" title={compatibleModels.join(', ')}>
                         Compatible: {compatibleModels.join(', ')}
@@ -184,7 +187,13 @@ export const columns: ColumnDef<Product>[] = [
         </div>
     ),
     cell: ({ row }) => {
-        const stock: number = row.getValue("stockLevel");
+        const product = row.original;
+        const stock: number = product.stockLevel;
+        
+        if (product.isCombo) {
+            return <div className="text-center"><Badge variant="outline">Combo</Badge></div>
+        }
+
         return <div className="text-center"><Badge variant="secondary">{stock}</Badge></div>
     }
   },
@@ -199,22 +208,40 @@ export const columns: ColumnDef<Product>[] = [
   {
     id: 'availableStock',
     header: () => <div className="text-center">Disponible</div>,
-    cell: ({ row }) => {
-      const stock: number = row.original.stockLevel;
-      const reserved: number = row.original.reservedStock || 0;
-      const available = stock - reserved;
-      const threshold: number = row.original.lowStockThreshold;
+    cell: ({ row, table }) => {
+      const product = row.original;
+      const allProducts = (table.options.meta as { allProducts: Product[] })?.allProducts || [];
 
+      let availableStock: number;
+      if (product.isCombo) {
+          const comboItems = product.comboItems || [];
+          if (comboItems.length === 0 || allProducts.length === 0) {
+              availableStock = 0;
+          } else {
+              availableStock = Math.min(
+                  ...comboItems.map(item => {
+                      const component = allProducts.find(p => p.id === item.productId);
+                      if (!component) return 0;
+                      const componentAvailable = component.stockLevel - (component.reservedStock || 0);
+                      return Math.floor(componentAvailable / item.quantity);
+                  })
+              );
+          }
+      } else {
+          availableStock = product.stockLevel - (product.reservedStock || 0);
+      }
+      
+      const threshold = product.lowStockThreshold;
       let variant: "default" | "secondary" | "destructive" | "outline" = "secondary";
       let className = "";
-      if (available <= 0) {
+      if (availableStock <= 0) {
         variant = "destructive"
-      } else if (available <= threshold) {
+      } else if (availableStock <= threshold) {
         variant = "outline";
         className = "border-yellow-500 text-yellow-500"
       }
 
-      return <div className="text-center"><Badge variant={variant} className={className}>{available}</Badge></div>
+      return <div className="text-center"><Badge variant={variant} className={className}>{availableStock}</Badge></div>
     }
   },
   {
@@ -246,17 +273,17 @@ export const columns: ColumnDef<Product>[] = [
         const { format, convert, getDynamicPrice } = useCurrency();
         const product = row.original;
         
-        const manualOrDynamicPrice = (product.retailPrice && product.retailPrice > 0) 
-            ? product.retailPrice 
-            : getDynamicPrice(product.costPrice);
-
-        const promoPrice = product.promoPrice;
-        const hasPromo = promoPrice && promoPrice > 0;
+        // This is now always dynamic based on cost price and margin.
+        const dynamicPrice = getDynamicPrice(product.costPrice);
         
-        // El precio de oferta tiene prioridad si está activo
-        const displayPrice = hasPromo ? promoPrice : manualOrDynamicPrice;
+        // Promo price still takes priority for display if it exists.
+        const promoPrice = (typeof product.promoPrice === 'number' && product.promoPrice > 0) ? product.promoPrice : 0;
+        const hasPromo = promoPrice > 0;
         
-        const amountBs = convert(displayPrice, 'USD', 'Bs');
+        const displayPrice = hasPromo ? promoPrice : dynamicPrice;
+        
+        // BS amount is ALWAYS calculated from the non-promo price.
+        const amountBs = convert(dynamicPrice, 'USD', 'Bs');
    
         return (
           <div className="text-right">
@@ -265,10 +292,9 @@ export const columns: ColumnDef<Product>[] = [
               ${format(displayPrice)}
             </div>
 
-            {/* Mostrar el precio de referencia si hay promo y es diferente */}
-            {hasPromo && manualOrDynamicPrice !== promoPrice && (
+            {hasPromo && dynamicPrice !== promoPrice && (
               <div className="text-xs text-muted-foreground line-through">
-                Ref: ${format(manualOrDynamicPrice)}
+                Ref: ${format(dynamicPrice)}
               </div>
             )}
             
@@ -284,5 +310,3 @@ export const columns: ColumnDef<Product>[] = [
     cell: ({ row }) => <ActionsCell product={row.original} />,
   },
 ]
-
-    

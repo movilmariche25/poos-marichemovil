@@ -46,6 +46,14 @@ export function AdminAuthDialog({ children, onAuthorized }: AdminAuthDialogProps
     setPassword("");
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      e.stopPropagation();
+      handleAuth();
+    }
+  }
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>{children}</DialogTrigger>
@@ -64,7 +72,7 @@ export function AdminAuthDialog({ children, onAuthorized }: AdminAuthDialogProps
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleAuth()}
+              onKeyDown={handleKeyDown}
             />
           </div>
         </div>
