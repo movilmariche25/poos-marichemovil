@@ -16,7 +16,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { Trash2 } from "lucide-react";
+import { Loader2, RefreshCw, Trash2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
@@ -24,7 +24,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useDoc, useFirebase, useMemoFirebase, setDocumentNonBlocking } from "@/firebase";
 import { doc } from "firebase/firestore";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { AppSettings } from "@/lib/types";
 
 const settingsSchema = z.object({
@@ -39,6 +39,7 @@ type SettingsFormData = z.infer<typeof settingsSchema>;
 export default function SettingsPage() {
     const { toast } = useToast();
     const { firestore } = useFirebase();
+    const [isFetchingRate, setIsFetchingRate] = useState(false);
     
     const settingsRef = useMemoFirebase(() => 
         firestore ? doc(firestore, 'app-settings', 'main') : null,
@@ -78,6 +79,37 @@ export default function SettingsPage() {
         });
     }
 
+    const handleUpdateBcvRate = async () => {
+        setIsFetchingRate(true);
+        try {
+            const response = await fetch('https://ve.dolarapi.com/v1/dolares/oficial');
+            if (!response.ok) {
+                throw new Error(`Error de red: ${response.statusText}`);
+            }
+            const data = await response.json();
+            
+            if (data && data.promedio) {
+                form.setValue('bcvRate', data.promedio, { shouldValidate: true });
+                toast({
+                    title: "Tasa BCV Actualizada",
+                    description: `Nuevo valor: ${data.promedio}. Guarda los cambios para aplicar.`,
+                });
+            } else {
+                 throw new Error("Formato de respuesta de API inesperado.");
+            }
+        } catch (error) {
+            console.error("Error al obtener la tasa BCV:", error);
+            toast({
+                variant: "destructive",
+                title: "Error al Actualizar Tasa",
+                description: "No se pudo obtener la tasa desde la API. Por favor, inténtalo de nuevo o introdúcela manualmente.",
+            });
+        } finally {
+            setIsFetchingRate(false);
+        }
+    };
+
+
     const handleResetData = () => {
         toast({
             variant: "destructive",
@@ -108,9 +140,14 @@ export default function SettingsPage() {
                                     render={({ field }) => (
                                         <FormItem>
                                             <FormLabel>Tasa Oficial (BCV)</FormLabel>
+                                            <div className="flex items-center gap-2">
                                                 <FormControl>
                                                     <Input type="number" step="0.01" placeholder="Ej: 36.50" {...field} />
                                                 </FormControl>
+                                                <Button type="button" variant="outline" size="icon" onClick={handleUpdateBcvRate} disabled={isFetchingRate}>
+                                                    {isFetchingRate ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+                                                </Button>
+                                            </div>
                                             <FormDescription>La tasa utilizada para la facturación final.</FormDescription>
                                             <FormMessage />
                                         </FormItem>
