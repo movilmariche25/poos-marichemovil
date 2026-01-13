@@ -1,4 +1,5 @@
 
+
 "use client";
 
 import type { Sale, Payment, CartItem } from "@/lib/types";
@@ -64,7 +65,7 @@ export function ReceiptView({ sale, currencySymbol, formatCurrency, getPaymentAm
                     <p className="font-semibold mb-1 text-center">Pagos:</p>
                     {sale.payments.map((p, index) => (
                         <div key={index} className="flex justify-between">
-                            <span>{p.method}:</span>
+                            <span>{p.method}{p.reference ? ` (${p.reference})` : ''}:</span>
                             <span>{getPaymentAmountInCorrectCurrency(p)}</span>
                         </div>
                     ))}

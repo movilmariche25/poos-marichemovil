@@ -3,7 +3,7 @@
 
 import { createContext, useContext, useState, useEffect, type ReactNode, useCallback } from 'react';
 
-const ADMIN_PASSWORD = "Mayra*230499";
+const ADMIN_PASSWORD = "2026";
 const SESSION_STORAGE_KEY = 'app_unlocked';
 
 interface AppLockContextType {

@@ -312,7 +312,7 @@ export function TransactionList({ sales, isLoading }: TransactionListProps) {
                          {sale.payments && sale.payments.length > 0 && (
                             <div className="mt-2 space-y-1 text-xs text-right text-muted-foreground">
                                 <p className="font-semibold">Pagos:</p>
-                                {sale.payments.map((p, i) => <p key={i}>{p.method}: {getPaymentAmountInCorrectCurrency(p)}</p>)}
+                                {sale.payments.map((p, i) => <p key={i}>{p.method}{p.reference ? ` (${p.reference})` : ''}: {getPaymentAmountInCorrectCurrency(p)}</p>)}
                             </div>
                         )}
                     </AccordionContent>

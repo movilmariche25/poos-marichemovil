@@ -1,4 +1,5 @@
 
+
 "use client";
 
 import { useState, useMemo } from "react";
@@ -20,7 +21,7 @@ type CashReconciliationDialogProps = {
   openSales: Sale[];
 };
 
-const paymentMethodsOrder: PaymentMethod[] = ['Efectivo USD', 'Efectivo Bs', 'Tarjeta', 'Pago Móvil'];
+const paymentMethodsOrder: PaymentMethod[] = ['Efectivo USD', 'Efectivo Bs', 'Tarjeta', 'Pago Móvil', 'Transferencia'];
 
 export function CashReconciliationDialog({ openSales }: CashReconciliationDialogProps) {
   const { firestore } = useFirebase();
@@ -33,6 +34,7 @@ export function CashReconciliationDialog({ openSales }: CashReconciliationDialog
     'Efectivo Bs': 0,
     'Tarjeta': 0,
     'Pago Móvil': 0,
+    'Transferencia': 0,
   });
 
   const expectedAmounts = useMemo(() => {
@@ -41,10 +43,13 @@ export function CashReconciliationDialog({ openSales }: CashReconciliationDialog
       'Efectivo Bs': 0,
       'Tarjeta': 0,
       'Pago Móvil': 0,
+      'Transferencia': 0,
     };
     openSales.forEach(sale => {
       sale.payments.forEach(payment => {
-        totals[payment.method] += payment.amount;
+        if (totals[payment.method] !== undefined) {
+          totals[payment.method] += payment.amount;
+        }
       });
     });
     return totals;
@@ -99,13 +104,15 @@ export function CashReconciliationDialog({ openSales }: CashReconciliationDialog
     const reconciliationRef = doc(firestore, 'daily_reconciliations', reconciliationId);
     
     const paymentMethodDetails = paymentMethodsOrder.reduce((acc, method) => {
-        acc[method] = {
-            expected: expectedAmounts[method],
-            counted: countedAmounts[method],
-            difference: differences[method],
-        };
+        if (expectedAmounts[method] > 0 || countedAmounts[method] > 0) {
+            acc[method] = {
+                expected: expectedAmounts[method],
+                counted: countedAmounts[method],
+                difference: differences[method],
+            };
+        }
         return acc;
-    }, {} as { [key in PaymentMethod]: ReconciliationPaymentMethodSummary });
+    }, {} as { [key in PaymentMethod]?: ReconciliationPaymentMethodSummary });
 
     const newReconciliation: DailyReconciliation = {
       id: reconciliationId,
@@ -132,7 +139,7 @@ export function CashReconciliationDialog({ openSales }: CashReconciliationDialog
         description: `Se han cerrado ${transactionCount} ventas.`,
       });
       setIsOpen(false);
-      setCountedAmounts({ 'Efectivo USD': 0, 'Efectivo Bs': 0, 'Tarjeta': 0, 'Pago Móvil': 0 });
+      setCountedAmounts({ 'Efectivo USD': 0, 'Efectivo Bs': 0, 'Tarjeta': 0, 'Pago Móvil': 0, 'Transferencia': 0 });
     } catch (error) {
       console.error("Error closing day:", error);
       toast({
@@ -202,6 +209,7 @@ export function CashReconciliationDialog({ openSales }: CashReconciliationDialog
              <div className="space-y-4 p-4 bg-muted/50 rounded-lg">
                 <h3 className="font-semibold text-lg">Resumen del Cuadre</h3>
                  {paymentMethodsOrder.map(method => {
+                    if (expectedAmounts[method] === 0 && countedAmounts[method] === 0) return null;
                     const symbol = getSymbol(method === 'Efectivo USD' ? 'USD' : 'Bs');
                     const difference = differences[method];
                     return (

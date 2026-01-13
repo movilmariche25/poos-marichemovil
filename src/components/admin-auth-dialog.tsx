@@ -16,7 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 
-const ADMIN_PASSWORD = "Mayra*230499";
+const ADMIN_PASSWORD = "2026";
 
 type AdminAuthDialogProps = {
   children: ReactNode;

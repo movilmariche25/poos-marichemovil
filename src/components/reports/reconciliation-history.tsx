@@ -1,4 +1,5 @@
 
+
 "use client";
 
 import type { DailyReconciliation, PaymentMethod } from "@/lib/types";
@@ -10,14 +11,17 @@ import { useCurrency } from "@/hooks/use-currency";
 import { Skeleton } from "../ui/skeleton";
 import { cn } from "@/lib/utils";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
-import { ArrowDown, ArrowUp, Minus } from "lucide-react";
+import { ArrowDown, ArrowUp, Minus, Printer } from "lucide-react";
+import { Button } from "../ui/button";
+import { handlePrintReconciliation } from "./reconciliation-ticket";
+import { useToast } from "@/hooks/use-toast";
 
 type ReconciliationHistoryProps = {
   reconciliations: DailyReconciliation[];
   isLoading?: boolean;
 };
 
-const paymentMethodsOrder: PaymentMethod[] = ['Efectivo USD', 'Efectivo Bs', 'Tarjeta', 'Pago Móvil'];
+const paymentMethodsOrder: PaymentMethod[] = ['Efectivo USD', 'Efectivo Bs', 'Tarjeta', 'Pago Móvil', 'Transferencia'];
 
 const DifferenceIndicator = ({ difference }: { difference: number }) => {
     if (Math.abs(difference) < 0.01) return <Minus className="h-4 w-4 text-muted-foreground" />;
@@ -27,7 +31,19 @@ const DifferenceIndicator = ({ difference }: { difference: number }) => {
 
 
 export function ReconciliationHistory({ reconciliations, isLoading }: ReconciliationHistoryProps) {
-  const { format: formatCurrency, getSymbol } = useCurrency();
+  const currency = useCurrency();
+  const { format: formatCurrency, getSymbol } = currency;
+  const { toast } = useToast();
+
+  const onPrint = (reconciliation: DailyReconciliation) => {
+    handlePrintReconciliation({ reconciliation, currency }, (error) => {
+      toast({
+        variant: "destructive",
+        title: "Error de Impresión",
+        description: error,
+      });
+    });
+  };
 
   if (isLoading) {
     return (
@@ -87,7 +103,13 @@ export function ReconciliationHistory({ reconciliations, isLoading }: Reconcilia
                         </AccordionTrigger>
                         <AccordionContent>
                            <div className="p-4 bg-muted/50 rounded-lg">
-                                <h4 className="font-semibold mb-2">Detalles del Cierre</h4>
+                                <div className="flex justify-between items-center mb-2">
+                                    <h4 className="font-semibold">Detalles del Cierre</h4>
+                                    <Button variant="outline" size="sm" onClick={() => onPrint(recon)}>
+                                        <Printer className="mr-2 h-4 w-4" />
+                                        Imprimir
+                                    </Button>
+                                </div>
                                 <Table>
                                     <TableHeader>
                                         <TableRow>
@@ -99,9 +121,8 @@ export function ReconciliationHistory({ reconciliations, isLoading }: Reconcilia
                                     </TableHeader>
                                     <TableBody>
                                         {paymentMethodsOrder.map(method => {
-                                            if (!recon.paymentMethods) return null;
-                                            const details = recon.paymentMethods[method];
-                                            if (!details) return null;
+                                            if (!recon.paymentMethods || !recon.paymentMethods[method]) return null;
+                                            const details = recon.paymentMethods[method]!;
                                             const symbol = getSymbol(method === 'Efectivo USD' ? 'USD' : 'Bs');
                                             return (
                                                 <TableRow key={method}>

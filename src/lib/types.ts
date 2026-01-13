@@ -75,11 +75,12 @@ export type HeldSale = {
   items: CartItem[];
 };
 
-export type PaymentMethod = 'Efectivo USD' | 'Efectivo Bs' | 'Tarjeta' | 'Pago Móvil';
+export type PaymentMethod = 'Efectivo USD' | 'Efectivo Bs' | 'Tarjeta' | 'Pago Móvil' | 'Transferencia';
 
 export type Payment = {
   method: PaymentMethod;
   amount: number;
+  reference?: string;
 }
 
 export type Sale = {
