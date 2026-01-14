@@ -1,5 +1,4 @@
 
-
 import type { RepairJob } from "@/lib/types";
 import { format, parseISO } from "date-fns";
 import { es } from "date-fns/locale";
@@ -18,7 +17,7 @@ export function RepairTicket({ repairJob, variant }: RepairTicketProps) {
                 <div className="text-center mb-2">
                     <h3 className="font-bold text-sm">Nota de Entrega (INTERNA)</h3>
                     <p>MARICHE MOVIL</p>
-                    <p>Fecha: {format(parseISO(repairJob.createdAt), "dd/MM/yy hh:mm a", { locale: es })}</p>
+                    <p>Fecha: {repairJob.createdAt ? format(parseISO(repairJob.createdAt), "dd/MM/yy hh:mm a", { locale: es }) : ''}</p>
                     <p className="font-bold text-sm">ID: {repairJob.id}</p>
                 </div>
                 
@@ -56,6 +55,16 @@ export function RepairTicket({ repairJob, variant }: RepairTicketProps) {
                     {repairJob.estimatedCost > 0 && <p><span className="font-semibold">Costo Estimado:</span> ${repairJob.estimatedCost.toFixed(2)}</p>}
                     {repairJob.amountPaid > 0 && <p><span className="font-semibold">Monto Pagado:</span> ${repairJob.amountPaid.toFixed(2)}</p>}
                 </div>
+
+                <div className="mt-4 pt-4 border-t border-black">
+                    <p className="text-center">_________________________</p>
+                    <p className="text-center font-semibold">Firma del Cliente</p>
+                </div>
+
+                <div className="mt-4 pt-2 border-t border-dashed border-black text-center">
+                    <p className="text-xs">Recorte y pegue en el equipo</p>
+                    <p className="font-bold text-lg tracking-wider">{repairJob.id}</p>
+                </div>
              </div>
         )
     }
@@ -66,7 +75,7 @@ export function RepairTicket({ repairJob, variant }: RepairTicketProps) {
             <div className="text-center mb-2">
                 <h3 className="font-bold text-sm">Nota de Entrega</h3>
                 <p>MARICHE MOVIL</p>
-                <p>Fecha: {format(parseISO(repairJob.createdAt), "dd/MM/yy hh:mm a", { locale: es })}</p>
+                <p>Fecha: {repairJob.createdAt ? format(parseISO(repairJob.createdAt), "dd/MM/yy hh:mm a", { locale: es }) : ''}</p>
                 <p className="font-bold text-sm">ID: {repairJob.id}</p>
             </div>
             
@@ -114,16 +123,6 @@ export function RepairTicket({ repairJob, variant }: RepairTicketProps) {
                 <p>3. No nos hacemos responsables por equipos abandonados después de 30 días de ser notificado para su retiro.</p>
                 <p>4. El cliente declara que el equipo es de su propiedad y no tiene reporte de robo.</p>
                 <p>5. Es indispensable presentar este ticket para retirar su equipo.</p>
-            </div>
-            <div className="mt-4 pt-4 border-t border-black">
-                <p className="text-center">_________________________</p>
-                <p className="text-center font-semibold">Firma del Cliente</p>
-            </div>
-
-            <div className="mt-4 pt-2 border-t border-dashed border-black text-center">
-                <p className="text-xs">Recorte y pegue en el equipo</p>
-                <p className="font-bold text-lg tracking-wider">{repairJob.id}</p>
-                <p className="font-semibold text-sm mt-2">Clave: _________________</p>
             </div>
         </div>
     )
@@ -175,5 +174,3 @@ export const handlePrintTicket = (props: RepairTicketProps, onError: (message: s
         onError("No se pudo abrir la ventana de impresión. Revisa si tu navegador está bloqueando las ventanas emergentes.");
     }
 };
-
-    
