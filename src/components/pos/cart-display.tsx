@@ -178,10 +178,6 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
 
       const completedSale: Sale = { ...saleDataObject, id: saleId, status: 'completed' };
       
-      if(repairJobId) {
-          router.push('/dashboard/repairs');
-      }
-      
       setDiscount(0);
 
       return completedSale;
@@ -293,7 +289,14 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
                 placeholder="0.00"
             />
         </div>
-        <CheckoutDialog cart={cart} allProducts={allProducts} total={total} onCheckout={handleCheckout} onClearCart={onClearCart}>
+        <CheckoutDialog 
+            cart={cart} 
+            allProducts={allProducts} 
+            total={total} 
+            onCheckout={handleCheckout} 
+            onClearCart={onClearCart}
+            isRepairSale={!!repairJobId}
+        >
             <Button size="lg" disabled={cart.length === 0} className="w-full h-16 text-xl flex flex-col items-center">
                 <span className="text-2xl font-bold">PAGAR: ${formatCurrency(total)}</span>
                 <span className="text-sm font-normal text-primary-foreground/80">

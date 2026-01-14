@@ -1,4 +1,5 @@
 
+
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -339,6 +340,7 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
     }
 
     const finalValues = { ...values, notes: values.notes || "" };
+    let shouldCloseDialog = true;
 
     if (repairJob) {
       const jobRef = doc(firestore, 'repair_jobs', repairJob.id!);
@@ -360,8 +362,12 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
       onPrint(fullJobData);
       
       toast({ title: "Trabajo de Reparación Creado", description: `Nuevo trabajo para ${values.customerName} ha sido registrado.` });
+      shouldCloseDialog = false; // Keep dialog open after printing
     }
-    setOpen(false);
+    
+    if (shouldCloseDialog) {
+        setOpen(false);
+    }
   }
   
   const estimatedCost = form.watch('estimatedCost');

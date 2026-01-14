@@ -44,13 +44,7 @@ function POSContent() {
         const repairJobData = searchParams.get('repairJob');
         const restoredSaleId = searchParams.get('restoredSaleId');
         const restoredCartItems = searchParams.get('items');
-        const shouldClear = searchParams.get('clear') === 'true';
-
-        if (shouldClear) {
-            router.replace('/dashboard/pos', undefined);
-            return;
-        }
-
+       
         if (restoredCartItems && products && !isUserLoading) {
             try {
                 const itemsToRestore: CartItem[] = JSON.parse(decodeURIComponent(restoredCartItems));
@@ -73,7 +67,8 @@ function POSContent() {
                     deleteDocumentNonBlocking(saleRef);
                 }
 
-                router.replace('/dashboard/pos?clear=true', undefined);
+                // Clear URL params after restoring
+                router.replace('/dashboard/pos', undefined);
 
 
             } catch(e) {

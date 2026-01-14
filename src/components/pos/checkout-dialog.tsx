@@ -14,6 +14,7 @@ import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { ScrollArea } from "../ui/scroll-area";
 import { cn } from "@/lib/utils";
+import { useRouter } from "next/navigation";
 
 type CheckoutDialogProps = {
   cart: CartItem[];
@@ -22,6 +23,7 @@ type CheckoutDialogProps = {
   children: ReactNode;
   onCheckout: (payments: Payment[]) => Promise<Sale | null>;
   onClearCart: () => void;
+  isRepairSale?: boolean;
 };
 
 const paymentMethodOptions: { value: PaymentMethod, label: string, icon: ReactNode, hasReference: boolean, isBs: boolean }[] = [
@@ -34,12 +36,14 @@ const paymentMethodOptions: { value: PaymentMethod, label: string, icon: ReactNo
 
 type TempPayment = Payment & { id: number };
 
-export function CheckoutDialog({ cart, allProducts, total, children, onCheckout, onClearCart }: CheckoutDialogProps) {
+export function CheckoutDialog({ cart, allProducts, total, children, onCheckout, onClearCart, isRepairSale }: CheckoutDialogProps) {
   const [open, setOpen] = useState(false);
   const [completedSale, setCompletedSale] = useState<Sale | null>(null);
   const { toast } = useToast();
   const { format, getSymbol, convert, isLoading: currencyLoading } = useCurrency();
   const [payments, setPayments] = useState<TempPayment[]>([]);
+  const router = useRouter();
+
 
   useEffect(() => {
     if (open && !completedSale) {
@@ -107,7 +111,13 @@ export function CheckoutDialog({ cart, allProducts, total, children, onCheckout,
   }
 
   const handleCloseAndReset = () => {
-      onClearCart();
+      // Logic after closing the receipt dialog
+      if (isRepairSale) {
+        router.push('/dashboard/repairs');
+      } else {
+        onClearCart(); // For regular sales, just clear the cart
+      }
+      // Reset state for the next transaction
       setCompletedSale(null);
       setOpen(false);
   }
