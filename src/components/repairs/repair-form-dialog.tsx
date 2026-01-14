@@ -1,5 +1,4 @@
 
-
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -36,7 +35,7 @@ import { Label } from "../ui/label";
 import { useFirebase, setDocumentNonBlocking, addDocumentNonBlocking, useCollection, useMemoFirebase } from "@/firebase";
 import { collection, doc, writeBatch, query, where, getDocs, getDoc } from "firebase/firestore";
 import { handlePrintTicket } from "./repair-ticket";
-import { AlertCircle, Info, Printer, Search, TicketPercent, UserSearch, UserPlus, ArrowRight } from "lucide-react";
+import { AlertCircle, Info, Printer, Search, TicketPercent, UserSearch } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "../ui/command";
 import { format, addDays } from "date-fns";
@@ -44,7 +43,6 @@ import { useDebounce } from "use-debounce";
 import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
 import { es } from "date-fns/locale";
 import { cn } from "@/lib/utils";
-import { useRouter } from "next/navigation";
 
 
 const repairStatuses: RepairStatus[] = ['Pendiente', 'Completado'];
@@ -122,6 +120,43 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
 
   const isReadOnly = repairJob?.status === 'Completado' && repairJob?.isPaid;
   
+  const [duplicateIdError, setDuplicateIdError] = useState<string | null>(null);
+  
+  const form = useForm<RepairFormData>({
+    resolver: zodResolver(formSchema),
+    defaultValues: {
+      customerName: "", customerPhone: "", customerID: "", customerAddress: "",
+      deviceMake: "", deviceModel: "", deviceImei: "", reportedIssue: "",
+      initialConditionsChecklist: [], estimatedCost: 0, amountPaid: 0,
+      isPaid: false, status: "Pendiente", notes: "", reservedParts: [],
+    },
+  });
+
+  const customerIdValue = form.watch('customerID');
+  const customerNameValue = form.watch('customerName');
+  const [debouncedCustomerId] = useDebounce(customerIdValue, 500);
+
+  useEffect(() => {
+    const checkDuplicateId = async () => {
+        if (!debouncedCustomerId || !allRepairJobs || (repairJob && debouncedCustomerId === repairJob.customerID)) {
+            setDuplicateIdError(null);
+            return;
+        }
+
+        const duplicate = allRepairJobs.find(
+            job => job.customerID === debouncedCustomerId && job.customerName.toLowerCase() !== customerNameValue.toLowerCase()
+        );
+
+        if (duplicate) {
+            setDuplicateIdError(`Esta cédula ya está registrada a nombre de ${duplicate.customerName}.`);
+        } else {
+            setDuplicateIdError(null);
+        }
+    };
+    checkDuplicateId();
+  }, [debouncedCustomerId, customerNameValue, allRepairJobs, repairJob]);
+
+
   const filteredCustomers = useMemo(() => {
     if (!allRepairJobs || !customerSearchQuery) return [];
     
@@ -143,31 +178,8 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
   }, [allRepairJobs, customerSearchQuery]);
 
 
-  const form = useForm<RepairFormData>({
-    resolver: zodResolver(formSchema),
-    defaultValues: {
-      customerName: "", customerPhone: "", customerID: "", customerAddress: "",
-      deviceMake: "", deviceModel: "", deviceImei: "", reportedIssue: "",
-      initialConditionsChecklist: [], estimatedCost: 0, amountPaid: 0,
-      isPaid: false, status: "Pendiente", notes: "", reservedParts: [],
-    },
-  });
-
   const imeiValue = form.watch('deviceImei');
   const [debouncedImei] = useDebounce(imeiValue, 500); 
-
-  const handleBsToUsdConversion = (bsAmountStr: string) => {
-    setAmountPaidInBs(bsAmountStr);
-    const bsAmount = parseFloat(bsAmountStr);
-    if (!isNaN(bsAmount) && bsAmount > 0) {
-        const usdAmount = convert(bsAmount, 'Bs', 'USD');
-        form.setValue('amountPaid', parseFloat(usdAmount.toFixed(2)));
-    } else if (bsAmountStr === "") {
-        // If user clears the Bs field, we don't automatically clear the USD field
-        // they might want to enter USD directly.
-    }
-  };
-
 
   useEffect(() => {
     if (!mainPart) {
@@ -240,6 +252,7 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
         setAmountPaidInBs("");
         setCustomerSearchQuery("");
         setIsCustomerSearchOpen(false);
+        setDuplicateIdError(null);
 
         if (repairJob) {
             form.reset({
@@ -251,6 +264,7 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
                 notes: repairJob.notes ?? "",
                 estimatedCost: repairJob.estimatedCost || 0,
                 amountPaid: repairJob.amountPaid || 0,
+                isPaid: repairJob.isPaid || false,
                 reservedParts: repairJob.reservedParts || [],
             });
             if (repairJob.reservedParts && repairJob.reservedParts.length > 0 && products) {
@@ -267,7 +281,7 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
         }
     }
   }, [repairJob, form, products, open]);
-
+  
   const onPrint = (job: RepairJob, variant: 'client' | 'internal') => {
     handlePrintTicket({ repairJob: job, variant }, (error) => {
       toast({
@@ -284,6 +298,15 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
         return;
     }
     if (!firestore) return;
+
+    if (duplicateIdError) {
+        toast({
+            variant: "destructive",
+            title: "Cédula Duplicada",
+            description: "Por favor, corrige la cédula o busca al cliente existente."
+        });
+        return;
+    }
     
     if (!values.reservedParts || values.reservedParts.length === 0) {
         toast({
@@ -347,7 +370,9 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
         });
     }
 
-    const finalValues = { ...values, notes: values.notes || "" };
+    // Ensure isPaid is calculated correctly
+    const isPaid = values.amountPaid >= values.estimatedCost && values.estimatedCost > 0;
+    const finalValues = { ...values, isPaid, notes: values.notes || "" };
     
     if (repairJob) {
       const jobRef = doc(firestore, 'repair_jobs', repairJob.id!);
@@ -361,14 +386,15 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
       const jobRef = doc(firestore, 'repair_jobs', jobId);
       batch.set(jobRef, newJobData);
       await batch.commit();
-      
+      setOpen(false);
+
       const fullJobData: RepairJob = { 
           ...newJobData,
           partsCost: 0, 
           laborCost: 0,
       };
+
       onPrint(fullJobData, 'client');
-      
       toast({ title: "Trabajo de Reparación Creado", description: `Nuevo trabajo para ${values.customerName} ha sido registrado.` });
     }
   }
@@ -399,6 +425,57 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
                 <fieldset disabled={isReadOnly}>
                     <div className="flex justify-between items-center mb-4">
                         <legend className="text-lg font-semibold">Información del Cliente</legend>
+                         <div className="flex items-center gap-2">
+                            <Popover open={isCustomerSearchOpen} onOpenChange={setIsCustomerSearchOpen}>
+                                <PopoverTrigger asChild>
+                                    <Button 
+                                        type="button" 
+                                        variant="outline"
+                                        onClick={() => {
+                                            const name = form.getValues("customerName");
+                                            const phone = form.getValues("customerPhone");
+                                            const id = form.getValues("customerID");
+                                            setCustomerSearchQuery(`${name} ${phone} ${id}`);
+                                        }}
+                                    >
+                                        <UserSearch className="h-4 w-4 mr-2"/>
+                                        Buscar Cliente
+                                    </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-[300px] p-0">
+                                <Command>
+                                     <CommandInput
+                                        placeholder="Buscar cliente..."
+                                        value={customerSearchQuery}
+                                        onValueChange={setCustomerSearchQuery}
+                                    />
+                                    <CommandList>
+                                    <CommandEmpty>No se encontraron clientes.</CommandEmpty>
+                                    <CommandGroup>
+                                        {filteredCustomers.map((customer) => (
+                                            <CommandItem
+                                                key={customer.phone}
+                                                value={`${customer.name} ${customer.phone} ${customer.id || ''}`}
+                                                onSelect={() => {
+                                                    form.setValue("customerName", customer.name);
+                                                    form.setValue("customerPhone", customer.phone);
+                                                    form.setValue("customerID", customer.id || "");
+                                                    form.setValue("customerAddress", customer.address || "");
+                                                    setIsCustomerSearchOpen(false);
+                                                }}
+                                            >
+                                                <div className="flex flex-col">
+                                                    <span>{customer.name}</span>
+                                                    <span className="text-xs text-muted-foreground">{customer.phone} - {customer.id}</span>
+                                                </div>
+                                            </CommandItem>
+                                        ))}
+                                    </CommandGroup>
+                                    </CommandList>
+                                </Command>
+                                </PopoverContent>
+                            </Popover>
+                        </div>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <FormField control={form.control} name="customerName" render={({ field }) => (
@@ -415,57 +492,15 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
                                 <FormMessage />
                             </FormItem>
                         )}/>
-                        <Popover open={isCustomerSearchOpen} onOpenChange={setIsCustomerSearchOpen}>
-                            <PopoverTrigger asChild>
-                                 <FormField control={form.control} name="customerID" render={({ field }) => (
-                                    <FormItem>
-                                        <FormLabel>Cédula de Identidad</FormLabel>
-                                        <FormControl>
-                                            <Input
-                                                placeholder="V-12345678" 
-                                                {...field}
-                                                value={customerSearchQuery}
-                                                onChange={(e) => {
-                                                    setCustomerSearchQuery(e.target.value)
-                                                    if(e.target.value.length > 0) setIsCustomerSearchOpen(true);
-                                                    else setIsCustomerSearchOpen(false);
-                                                }}
-                                            />
-                                        </FormControl>
-                                        <FormMessage />
-                                    </FormItem>
-                                )}/>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
-                               <Command>
-                                <CommandList>
-                                <CommandEmpty>No se encontraron clientes.</CommandEmpty>
-                                <CommandGroup>
-                                    {filteredCustomers.map((customer) => (
-                                        <CommandItem
-                                            key={customer.phone}
-                                            value={`${customer.name} ${customer.phone} ${customer.id || ''}`}
-                                            onSelect={() => {
-                                                form.setValue("customerName", customer.name);
-                                                form.setValue("customerPhone", customer.phone);
-                                                form.setValue("customerID", customer.id || "");
-                                                form.setValue("customerAddress", customer.address || "");
-                                                setCustomerSearchQuery(customer.id || "");
-                                                setIsCustomerSearchOpen(false);
-                                            }}
-                                        >
-                                            <div className="flex flex-col">
-                                                <span>{customer.name}</span>
-                                                <span className="text-xs text-muted-foreground">{customer.phone} - {customer.id}</span>
-                                            </div>
-                                        </CommandItem>
-                                    ))}
-                                </CommandGroup>
-                                </CommandList>
-                            </Command>
-                            </PopoverContent>
-                        </Popover>
-
+                        <FormField control={form.control} name="customerID" render={({ field }) => (
+                            <FormItem>
+                                <FormLabel>Cédula de Identidad</FormLabel>
+                                <FormControl><Input placeholder="V-12345678" {...field} /></FormControl>
+                                {duplicateIdError ? (
+                                    <p className="text-sm font-medium text-destructive">{duplicateIdError}</p>
+                                ) : <FormMessage />}
+                            </FormItem>
+                        )}/>
                         <FormField control={form.control} name="customerAddress" render={({ field }) => (
                             <FormItem>
                                 <FormLabel>Dirección</FormLabel>
@@ -553,7 +588,7 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
                                     {mainPart ? mainPart.name : "Seleccionar pieza principal..."}
                                 </Button>
                             </PopoverTrigger>
-                            <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
+                            <PopoverContent className="w-[300px] p-0">
                                 <Command>
                                     <CommandInput placeholder="Buscar pieza..." />
                                     <CommandList>
@@ -610,33 +645,33 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
                          <FormField control={form.control} name="amountPaid" render={({ field }) => (
                             <FormItem>
-                                <FormLabel>Monto Pagado ($)</FormLabel>
+                                <FormLabel>Abono ({getSymbol()})</FormLabel>
                                 <FormControl>
                                     <Input 
                                         type="number" 
                                         step="0.01" 
                                         {...field}
-                                        onChange={e => {
-                                            field.onChange(e);
-                                            setAmountPaidInBs(""); // Clear Bs field if USD is typed
-                                        }}
+                                        disabled={!!repairJob}
                                     />
                                 </FormControl>
                                 <FormMessage />
                             </FormItem>
                         )}/>
-                        <FormItem>
-                            <FormLabel>o Monto Pagado (Bs)</FormLabel>
-                             <FormControl>
-                                <Input 
-                                    type="number" 
-                                    step="0.01"
-                                    value={amountPaidInBs}
-                                    onChange={(e) => handleBsToUsdConversion(e.target.value)}
-                                    placeholder="0.00"
-                                />
-                            </FormControl>
-                        </FormItem>
+                        <div>
+                            <Label>Abono (Bs)</Label>
+                             <Input 
+                                type="number" 
+                                step="0.01" 
+                                value={amountPaidInBs}
+                                onChange={(e) => {
+                                    const bsValue = parseFloat(e.target.value) || 0;
+                                    setAmountPaidInBs(e.target.value);
+                                    const usdValue = convert(bsValue, 'Bs', 'USD');
+                                    form.setValue('amountPaid', parseFloat(usdValue.toFixed(2)));
+                                }}
+                                disabled={!!repairJob}
+                            />
+                        </div>
                     </div>
 
                     <div className="text-sm text-destructive font-semibold text-right p-2 bg-muted rounded-md flex items-center justify-end">
@@ -676,5 +711,3 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
   );
 }
 
-
-    

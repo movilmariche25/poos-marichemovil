@@ -52,8 +52,9 @@ export function RepairTicket({ repairJob, variant }: RepairTicketProps) {
                 <div className="my-2 border-t border-dashed border-black"></div>
 
                 <div className="text-right space-y-1">
-                    {repairJob.estimatedCost > 0 && <p><span className="font-semibold">Costo Estimado:</span> ${repairJob.estimatedCost.toFixed(2)}</p>}
-                    {repairJob.amountPaid > 0 && <p><span className="font-semibold">Monto Pagado:</span> ${repairJob.amountPaid.toFixed(2)}</p>}
+                    <p><span className="font-semibold">Costo Estimado:</span> ${repairJob.estimatedCost.toFixed(2)}</p>
+                    {repairJob.amountPaid > 0 && <p><span className="font-semibold">Abono:</span> ${repairJob.amountPaid.toFixed(2)}</p>}
+                    <p className="font-bold"><span className="font-semibold">Saldo Pendiente:</span> ${Math.max(0, repairJob.estimatedCost - repairJob.amountPaid).toFixed(2)}</p>
                 </div>
 
                 <div className="mt-4 pt-4 border-t border-black">
@@ -109,9 +110,10 @@ export function RepairTicket({ repairJob, variant }: RepairTicketProps) {
 
             <div className="my-2 border-t border-dashed border-black"></div>
 
-            <div className="text-center space-y-1">
-                {repairJob.estimatedCost > 0 && <p className="font-bold">Costo Estimado: ${repairJob.estimatedCost.toFixed(2)}</p>}
-                {repairJob.amountPaid > 0 && <p>Monto Pagado: ${repairJob.amountPaid.toFixed(2)}</p>}
+            <div className="text-right space-y-1">
+                 <p><span className="font-semibold">Costo Estimado:</span> ${repairJob.estimatedCost.toFixed(2)}</p>
+                 {repairJob.amountPaid > 0 && <p><span className="font-semibold">Abono:</span> ${repairJob.amountPaid.toFixed(2)}</p>}
+                 <p className="font-bold"><span className="font-semibold">Saldo Pendiente:</span> ${Math.max(0, repairJob.estimatedCost - repairJob.amountPaid).toFixed(2)}</p>
             </div>
 
              <div className="my-2 border-t border-dashed border-black"></div>
@@ -174,3 +176,4 @@ export const handlePrintTicket = (props: RepairTicketProps, onError: (message: s
         onError("No se pudo abrir la ventana de impresión. Revisa si tu navegador está bloqueando las ventanas emergentes.");
     }
 };
+
