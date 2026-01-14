@@ -318,41 +318,40 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
     }
 
     const batch = writeBatch(firestore);
-    const originalParts = repairJob?.reservedParts || [];
-    const newParts = values.reservedParts || [];
-
-    const reservationChanges: { [productId: string]: number } = {};
-
-    originalParts.forEach(part => {
-        reservationChanges[part.productId] = (reservationChanges[part.productId] || 0) - part.quantity;
-    });
-
-    newParts.forEach(part => {
-        reservationChanges[part.productId] = (reservationChanges[part.productId] || 0) + part.quantity;
-    });
-
-    for (const productId in reservationChanges) {
-        const change = reservationChanges[productId];
-        if (change !== 0) {
-            const productRef = doc(firestore, 'products', productId);
-            try {
-                const productDoc = await getDoc(productRef);
-                if (productDoc.exists()) {
-                    const productData = productDoc.data() as Product;
-                    const newReservedStock = (productData.reservedStock || 0) + change;
-                    batch.update(productRef, { reservedStock: newReservedStock < 0 ? 0 : newReservedStock });
-                }
-            } catch (e) {
-                console.error(`Failed to update stock for product ${productId}:`, e);
-                toast({
-                    variant: "destructive",
-                    title: "Error de Inventario",
-                    description: `No se pudo actualizar el stock para el producto ID ${productId}.`
-                });
-                return;
+    
+    // Un-reserve original parts if editing
+    if (repairJob && repairJob.reservedParts) {
+        for (const part of repairJob.reservedParts) {
+            const productRef = doc(firestore, "products", part.productId);
+            const productDoc = await getDoc(productRef);
+            if (productDoc.exists()) {
+                const currentReserved = productDoc.data().reservedStock || 0;
+                batch.update(productRef, { reservedStock: Math.max(0, currentReserved - part.quantity) });
             }
         }
     }
+
+    // Reserve new parts
+    for (const part of values.reservedParts) {
+        const productRef = doc(firestore, "products", part.productId);
+        const productDoc = await getDoc(productRef);
+        if (productDoc.exists()) {
+            const productData = productDoc.data();
+            const currentReserved = productData.reservedStock || 0;
+            const availableStock = productData.stockLevel - currentReserved;
+            
+            if (availableStock < part.quantity && !(repairJob?.reservedParts?.some(p => p.productId === part.productId))) {
+                 toast({
+                    variant: "destructive",
+                    title: "Stock Insuficiente",
+                    description: `No hay suficiente stock disponible para la pieza "${part.productName}".`
+                });
+                return; // Stop submission
+            }
+            batch.update(productRef, { reservedStock: currentReserved + part.quantity });
+        }
+    }
+
 
     const wasCompleted = repairJob?.status === 'Completado';
     const isNowCompleted = values.status === 'Completado';
@@ -370,7 +369,6 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
         });
     }
 
-    // Ensure isPaid is calculated correctly
     const isPaid = values.amountPaid >= values.estimatedCost && values.estimatedCost > 0;
     const finalValues = { ...values, isPaid, notes: values.notes || "" };
     
@@ -710,4 +708,3 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
     </Dialog>
   );
 }
-

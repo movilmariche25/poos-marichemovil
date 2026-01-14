@@ -11,6 +11,7 @@ type RepairTicketProps = {
 
 export function RepairTicket({ repairJob, variant }: RepairTicketProps) {
     
+    // Internal Ticket
     if (variant === 'internal') {
         return (
              <div className="text-black bg-white p-2 font-mono text-xs max-w-[215px] mx-auto">
@@ -53,8 +54,12 @@ export function RepairTicket({ repairJob, variant }: RepairTicketProps) {
 
                 <div className="text-right space-y-1">
                     <p><span className="font-semibold">Costo Estimado:</span> ${repairJob.estimatedCost.toFixed(2)}</p>
-                    {repairJob.amountPaid > 0 && <p><span className="font-semibold">Abono:</span> ${repairJob.amountPaid.toFixed(2)}</p>}
-                    <p className="font-bold"><span className="font-semibold">Saldo Pendiente:</span> ${Math.max(0, repairJob.estimatedCost - repairJob.amountPaid).toFixed(2)}</p>
+                    {repairJob.amountPaid > 0 && (
+                        <>
+                            <p><span className="font-semibold">Abono:</span> ${repairJob.amountPaid.toFixed(2)}</p>
+                            <p className="font-bold"><span className="font-semibold">Saldo Pendiente:</span> ${Math.max(0, repairJob.estimatedCost - repairJob.amountPaid).toFixed(2)}</p>
+                        </>
+                    )}
                 </div>
 
                 <div className="mt-4 pt-4 border-t border-black">
@@ -111,9 +116,13 @@ export function RepairTicket({ repairJob, variant }: RepairTicketProps) {
             <div className="my-2 border-t border-dashed border-black"></div>
 
             <div className="text-right space-y-1">
-                 <p><span className="font-semibold">Costo Estimado:</span> ${repairJob.estimatedCost.toFixed(2)}</p>
-                 {repairJob.amountPaid > 0 && <p><span className="font-semibold">Abono:</span> ${repairJob.amountPaid.toFixed(2)}</p>}
-                 <p className="font-bold"><span className="font-semibold">Saldo Pendiente:</span> ${Math.max(0, repairJob.estimatedCost - repairJob.amountPaid).toFixed(2)}</p>
+                <p><span className="font-semibold">Costo Estimado:</span> ${repairJob.estimatedCost.toFixed(2)}</p>
+                {repairJob.amountPaid > 0 && (
+                    <>
+                        <p><span className="font-semibold">Abono:</span> ${repairJob.amountPaid.toFixed(2)}</p>
+                        <p className="font-bold"><span className="font-semibold">Saldo Pendiente:</span> ${Math.max(0, repairJob.estimatedCost - repairJob.amountPaid).toFixed(2)}</p>
+                    </>
+                )}
             </div>
 
              <div className="my-2 border-t border-dashed border-black"></div>
@@ -177,3 +186,4 @@ export const handlePrintTicket = (props: RepairTicketProps, onError: (message: s
     }
 };
 
+    
