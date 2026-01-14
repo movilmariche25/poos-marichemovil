@@ -100,8 +100,10 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
   const { firestore } = useFirebase();
   const [open, setOpen] = useState(false);
   
+  const [isCustomerSearchOpen, setIsCustomerSearchOpen] = useState(false);
+  const [customerSearchQuery, setCustomerSearchQuery] = useState("");
+  
   const [partsPopoverOpen, setPartsPopoverOpen] = useState(false);
-  const [customerSearchPopoverOpen, setCustomerSearchPopoverOpen] = useState(false);
   const [amountPaidInBs, setAmountPaidInBs] = useState<number | string>("");
 
 
@@ -119,14 +121,17 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
   const { data: allRepairJobs } = useCollection<RepairJob>(repairsCollection);
 
   const isReadOnly = repairJob?.status === 'Completado' && repairJob?.isPaid;
-
-  const uniqueCustomers = useMemo(() => {
-    if (!allRepairJobs) return [];
+  
+  const filteredCustomers = useMemo(() => {
+    if (!allRepairJobs || !customerSearchQuery) return [];
+    
     const customerMap = new Map<string, { name: string; phone: string; id?: string; address?: string }>();
     for (let i = allRepairJobs.length - 1; i >= 0; i--) {
         const job = allRepairJobs[i];
-        if (job.customerName && !customerMap.has(job.customerName.toLowerCase())) {
-            customerMap.set(job.customerName.toLowerCase(), { 
+        const searchString = `${job.customerName} ${job.customerPhone} ${job.customerID || ''}`.toLowerCase();
+        
+        if (job.customerName && searchString.includes(customerSearchQuery.toLowerCase()) && !customerMap.has(job.customerName.toLowerCase())) {
+             customerMap.set(job.customerName.toLowerCase(), { 
                 name: job.customerName, 
                 phone: job.customerPhone,
                 id: job.customerID,
@@ -135,7 +140,8 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
         }
     }
     return Array.from(customerMap.values());
-  }, [allRepairJobs]);
+  }, [allRepairJobs, customerSearchQuery]);
+
 
   const form = useForm<RepairFormData>({
     resolver: zodResolver(formSchema),
@@ -232,6 +238,8 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
         setMainPart(null);
         setUsePromoPrice(false);
         setAmountPaidInBs("");
+        setCustomerSearchQuery("");
+        setIsCustomerSearchOpen(false);
 
         if (repairJob) {
             form.reset({
@@ -260,8 +268,8 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
     }
   }, [repairJob, form, products, open]);
 
-  const onPrint = (job: RepairJob) => {
-    handlePrintTicket({ repairJob: job }, (error) => {
+  const onPrint = (job: RepairJob, variant: 'client' | 'internal') => {
+    handlePrintTicket({ repairJob: job, variant }, (error) => {
       toast({
         variant: "destructive",
         title: "Error de Impresión",
@@ -340,13 +348,13 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
     }
 
     const finalValues = { ...values, notes: values.notes || "" };
-    let shouldCloseDialog = true;
-
+    
     if (repairJob) {
       const jobRef = doc(firestore, 'repair_jobs', repairJob.id!);
       batch.set(jobRef, { ...finalValues, ...completionData }, { merge: true });
       await batch.commit();
       toast({ title: "Trabajo de Reparación Actualizado", description: `El trabajo para ${values.customerName} ha sido actualizado.` });
+      setOpen(false);
     } else {
       const jobId = generateJobId();
       const newJobData = { ...finalValues, id: jobId, createdAt: new Date().toISOString(), ...completionData };
@@ -359,14 +367,9 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
           partsCost: 0, 
           laborCost: 0,
       };
-      onPrint(fullJobData);
+      onPrint(fullJobData, 'client');
       
       toast({ title: "Trabajo de Reparación Creado", description: `Nuevo trabajo para ${values.customerName} ha sido registrado.` });
-      shouldCloseDialog = false; // Keep dialog open after printing
-    }
-    
-    if (shouldCloseDialog) {
-        setOpen(false);
     }
   }
   
@@ -396,41 +399,6 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
                 <fieldset disabled={isReadOnly}>
                     <div className="flex justify-between items-center mb-4">
                         <legend className="text-lg font-semibold">Información del Cliente</legend>
-                         <Popover open={customerSearchPopoverOpen} onOpenChange={setCustomerSearchPopoverOpen}>
-                            <PopoverTrigger asChild>
-                                <Button type="button" variant="outline" size="sm">
-                                    <UserSearch className="mr-2 h-4 w-4" /> Buscar Cliente
-                                </Button>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-[300px] p-0">
-                            <Command>
-                                <CommandInput placeholder="Buscar cliente..." />
-                                <CommandList>
-                                <CommandEmpty>No se encontraron clientes.</CommandEmpty>
-                                <CommandGroup>
-                                    {uniqueCustomers.map((customer) => (
-                                        <CommandItem
-                                            key={customer.phone}
-                                            value={`${customer.name} ${customer.phone} ${customer.id || ''}`}
-                                            onSelect={() => {
-                                                form.setValue("customerName", customer.name);
-                                                form.setValue("customerPhone", customer.phone);
-                                                form.setValue("customerID", customer.id || "");
-                                                form.setValue("customerAddress", customer.address || "");
-                                                setCustomerSearchPopoverOpen(false);
-                                            }}
-                                        >
-                                            <div className="flex flex-col">
-                                                <span>{customer.name}</span>
-                                                <span className="text-xs text-muted-foreground">{customer.phone} - {customer.id}</span>
-                                            </div>
-                                        </CommandItem>
-                                    ))}
-                                </CommandGroup>
-                                </CommandList>
-                            </Command>
-                            </PopoverContent>
-                        </Popover>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <FormField control={form.control} name="customerName" render={({ field }) => (
@@ -447,13 +415,57 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
                                 <FormMessage />
                             </FormItem>
                         )}/>
-                         <FormField control={form.control} name="customerID" render={({ field }) => (
-                            <FormItem>
-                                <FormLabel>Cédula de Identidad</FormLabel>
-                                <FormControl><Input placeholder="V-12345678" {...field} /></FormControl>
-                                <FormMessage />
-                            </FormItem>
-                        )}/>
+                        <Popover open={isCustomerSearchOpen} onOpenChange={setIsCustomerSearchOpen}>
+                            <PopoverTrigger asChild>
+                                 <FormField control={form.control} name="customerID" render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>Cédula de Identidad</FormLabel>
+                                        <FormControl>
+                                            <Input
+                                                placeholder="V-12345678" 
+                                                {...field}
+                                                value={customerSearchQuery}
+                                                onChange={(e) => {
+                                                    setCustomerSearchQuery(e.target.value)
+                                                    if(e.target.value.length > 0) setIsCustomerSearchOpen(true);
+                                                    else setIsCustomerSearchOpen(false);
+                                                }}
+                                            />
+                                        </FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}/>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
+                               <Command>
+                                <CommandList>
+                                <CommandEmpty>No se encontraron clientes.</CommandEmpty>
+                                <CommandGroup>
+                                    {filteredCustomers.map((customer) => (
+                                        <CommandItem
+                                            key={customer.phone}
+                                            value={`${customer.name} ${customer.phone} ${customer.id || ''}`}
+                                            onSelect={() => {
+                                                form.setValue("customerName", customer.name);
+                                                form.setValue("customerPhone", customer.phone);
+                                                form.setValue("customerID", customer.id || "");
+                                                form.setValue("customerAddress", customer.address || "");
+                                                setCustomerSearchQuery(customer.id || "");
+                                                setIsCustomerSearchOpen(false);
+                                            }}
+                                        >
+                                            <div className="flex flex-col">
+                                                <span>{customer.name}</span>
+                                                <span className="text-xs text-muted-foreground">{customer.phone} - {customer.id}</span>
+                                            </div>
+                                        </CommandItem>
+                                    ))}
+                                </CommandGroup>
+                                </CommandList>
+                            </Command>
+                            </PopoverContent>
+                        </Popover>
+
                         <FormField control={form.control} name="customerAddress" render={({ field }) => (
                             <FormItem>
                                 <FormLabel>Dirección</FormLabel>
@@ -644,10 +656,16 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
                 )}/>
                 <DialogFooter>
                     {repairJob && !isReadOnly && (
-                        <Button type="button" variant="outline" onClick={() => onPrint(repairJob)}>
-                            <Printer className="mr-2 h-4 w-4" />
-                            Imprimir Ticket
-                        </Button>
+                        <div className="flex gap-2">
+                             <Button type="button" variant="outline" onClick={() => onPrint(repairJob, 'internal')}>
+                                <Printer className="mr-2 h-4 w-4" />
+                                Imprimir (Interna)
+                            </Button>
+                            <Button type="button" variant="outline" onClick={() => onPrint(repairJob, 'client')}>
+                                <Printer className="mr-2 h-4 w-4" />
+                                Imprimir (Cliente)
+                            </Button>
+                        </div>
                     )}
                     <Button type="submit">{isReadOnly ? 'Cerrar' : (repairJob ? 'Guardar Cambios' : 'Registrar y Imprimir Ticket')}</Button>
                 </DialogFooter>

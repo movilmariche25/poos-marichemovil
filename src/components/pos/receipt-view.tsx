@@ -20,7 +20,7 @@ export function ReceiptView({ sale, currencySymbol, formatCurrency, getPaymentAm
          <div className="text-black bg-white p-2 font-mono text-xs max-w-[215px] mx-auto">
             <div className="text-center mb-2">
                 <h3 className="font-semibold text-sm">Nota de Entrega</h3>
-                <p>TabletSP+ v1.0.2</p>
+                <p>MARICHE MOVIL</p>
                 <p>{format(parseISO(sale.transactionDate), "dd/MM/yy hh:mm a", { locale: es })}</p>
                 <p>ID: {sale.id}</p>
             </div>
@@ -119,3 +119,5 @@ export const handlePrintReceipt = (props: ReceiptViewProps, onError: (message: s
         onError("No se pudo abrir la ventana de impresión. Revisa si tu navegador está bloqueando las ventanas emergentes.");
     }
 };
+
+    

@@ -1,4 +1,5 @@
 
+
 'use client';
 
 import type { DailyReconciliation, PaymentMethod } from "@/lib/types";
@@ -22,7 +23,7 @@ export function ReconciliationTicket({ reconciliation, currency }: Reconciliatio
         <div className="text-black bg-white p-2 font-mono text-xs max-w-[215px] mx-auto">
             <div className="text-center mb-2">
                 <h3 className="font-bold text-sm">Cierre de Caja</h3>
-                <p>TabletSP+ v1.0.2</p>
+                <p>MARICHE MOVIL</p>
                 <p>Fecha: {formatDate(parseISO(reconciliation.closedAt), "dd/MM/yy hh:mm a", { locale: es })}</p>
                 <p className="font-bold text-sm">ID: {reconciliation.id}</p>
             </div>
@@ -112,3 +113,5 @@ export const handlePrintReconciliation = (props: ReconciliationTicketProps, onEr
         onError("No se pudo abrir la ventana de impresión. Revisa si tu navegador está bloqueando las ventanas emergentes.");
     }
 }
+
+    

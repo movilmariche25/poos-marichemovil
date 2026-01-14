@@ -104,8 +104,8 @@ const ActionsCell = ({ repairJob }: { repairJob: RepairJob }) => {
         }
     }
     
-    const onPrint = () => {
-        handlePrintTicket({ repairJob }, (error) => {
+    const onPrint = (variant: 'client' | 'internal') => {
+        handlePrintTicket({ repairJob, variant }, (error) => {
              toast({
                 variant: "destructive",
                 title: "Error de Impresión",
@@ -132,11 +132,6 @@ const ActionsCell = ({ repairJob }: { repairJob: RepairJob }) => {
                             Cobrar
                         </DropdownMenuItem>
                     )}
-
-                    <DropdownMenuItem onSelect={onPrint}>
-                        <Printer className="mr-2 h-4 w-4" />
-                        Imprimir Ticket
-                    </DropdownMenuItem>
                     
                     <RepairFormDialog repairJob={repairJob}>
                         <DropdownMenuItem onSelect={(e) => e.preventDefault()}>
@@ -144,6 +139,17 @@ const ActionsCell = ({ repairJob }: { repairJob: RepairJob }) => {
                             {isCompletedAndPaid ? 'Ver Detalles' : 'Editar / Ver Detalles'}
                         </DropdownMenuItem>
                     </RepairFormDialog>
+                    
+                    <DropdownMenuSeparator />
+                    <DropdownMenuLabel>Imprimir</DropdownMenuLabel>
+                    <DropdownMenuItem onSelect={() => onPrint('client')}>
+                        <Printer className="mr-2 h-4 w-4" />
+                        Ticket (Cliente)
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => onPrint('internal')}>
+                        <Printer className="mr-2 h-4 w-4" />
+                        Copia (Interna)
+                    </DropdownMenuItem>
 
 
                     <DropdownMenuSeparator />

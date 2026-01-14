@@ -1,4 +1,5 @@
 
+
 import type { RepairJob } from "@/lib/types";
 import { format, parseISO } from "date-fns";
 import { es } from "date-fns/locale";
@@ -6,14 +7,65 @@ import { renderToString } from "react-dom/server";
 
 type RepairTicketProps = {
     repairJob: RepairJob;
+    variant: 'client' | 'internal';
 }
 
-export function RepairTicket({ repairJob }: RepairTicketProps) {
+export function RepairTicket({ repairJob, variant }: RepairTicketProps) {
+    
+    if (variant === 'internal') {
+        return (
+             <div className="text-black bg-white p-2 font-mono text-xs max-w-[215px] mx-auto">
+                <div className="text-center mb-2">
+                    <h3 className="font-bold text-sm">Nota de Entrega (INTERNA)</h3>
+                    <p>MARICHE MOVIL</p>
+                    <p>Fecha: {format(parseISO(repairJob.createdAt), "dd/MM/yy hh:mm a", { locale: es })}</p>
+                    <p className="font-bold text-sm">ID: {repairJob.id}</p>
+                </div>
+                
+                <div className="my-2 border-t border-dashed border-black"></div>
+
+                <div className="space-y-1">
+                    <p><span className="font-semibold">Cliente:</span> {repairJob.customerName}</p>
+                    {repairJob.customerID && <p><span className="font-semibold">CI:</span> {repairJob.customerID}</p>}
+                    <p><span className="font-semibold">Teléfono:</span> {repairJob.customerPhone}</p>
+                    {repairJob.customerAddress && <p><span className="font-semibold">Dirección:</span> {repairJob.customerAddress}</p>}
+                </div>
+
+                <div className="my-2 border-t border-dashed border-black"></div>
+
+                <div className="space-y-1">
+                    <p><span className="font-semibold">Dispositivo:</span> {repairJob.deviceMake} {repairJob.deviceModel}</p>
+                    {repairJob.deviceImei && <p><span className="font-semibold">IMEI/Serie:</span> {repairJob.deviceImei}</p>}
+                    <div>
+                        <p className="font-semibold">Falla Reportada:</p>
+                        <p className="break-words">{repairJob.reportedIssue}</p>
+                    </div>
+                    {(repairJob.initialConditionsChecklist && repairJob.initialConditionsChecklist.length > 0) && (
+                        <div className="mt-1">
+                            <p className="font-semibold">Condiciones Iniciales:</p>
+                            <ul className="list-disc list-inside">
+                                {repairJob.initialConditionsChecklist.map((item, index) => <li key={index}>{item}</li>)}
+                            </ul>
+                        </div>
+                    )}
+                </div>
+
+                <div className="my-2 border-t border-dashed border-black"></div>
+
+                <div className="text-right space-y-1">
+                    {repairJob.estimatedCost > 0 && <p><span className="font-semibold">Costo Estimado:</span> ${repairJob.estimatedCost.toFixed(2)}</p>}
+                    {repairJob.amountPaid > 0 && <p><span className="font-semibold">Monto Pagado:</span> ${repairJob.amountPaid.toFixed(2)}</p>}
+                </div>
+             </div>
+        )
+    }
+
+    // Client Ticket
     return (
         <div className="text-black bg-white p-2 font-mono text-xs max-w-[215px] mx-auto">
             <div className="text-center mb-2">
                 <h3 className="font-bold text-sm">Nota de Entrega</h3>
-                <p>TabletSP+ v1.0.2</p>
+                <p>MARICHE MOVIL</p>
                 <p>Fecha: {format(parseISO(repairJob.createdAt), "dd/MM/yy hh:mm a", { locale: es })}</p>
                 <p className="font-bold text-sm">ID: {repairJob.id}</p>
             </div>
@@ -123,3 +175,5 @@ export const handlePrintTicket = (props: RepairTicketProps, onError: (message: s
         onError("No se pudo abrir la ventana de impresión. Revisa si tu navegador está bloqueando las ventanas emergentes.");
     }
 };
+
+    

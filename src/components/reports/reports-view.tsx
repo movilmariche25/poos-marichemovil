@@ -16,6 +16,7 @@ import { collection } from "firebase/firestore"
 import { CashReconciliationDialog } from "./cash-reconciliation-dialog"
 import { ReconciliationHistory } from "./reconciliation-history"
 import { RepairAnalysis } from "./repair-analysis"
+import { DateRangeReport } from "./date-range-report"
 
 type ReportsViewProps = {
     sales: Sale[];
@@ -34,75 +35,23 @@ export function ReportsView({ sales, products, repairJobs, isLoading }: ReportsV
     );
     const { data: reconciliations, isLoading: reconciliationsLoading } = useCollection<DailyReconciliation>(reconciliationsCollection);
 
-    const {
-        todaySales,
-        totalSalesToday,
-        profitToday,
-        weekSales,
-        totalSalesWeek,
-        profitWeek
-    } = useMemo(() => {
-        if (!sales || !products) {
-            return {
-                todaySales: [],
-                totalSalesToday: 0,
-                profitToday: 0,
-                weekSales: [],
-                totalSalesWeek: 0,
-                profitWeek: 0
-            };
+    const { todaySales } = useMemo(() => {
+        if (!sales) {
+            return { todaySales: [] };
         }
-
-        const calculateProfit = (saleList: Sale[]) => {
-            return saleList.reduce((totalProfit, sale) => {
-                const costOfGoods = sale.items.reduce((cost, item) => {
-                    if (item.isRepair) return cost;
-                    const product = products.find(p => p.id === item.productId);
-                    return cost + (product ? product.costPrice * item.quantity : 0);
-                }, 0);
-                return totalProfit + (sale.totalAmount - costOfGoods);
-            }, 0);
-        };
-
         const openSales = sales.filter(s => s.status !== 'refunded' && !s.reconciliationId);
-        
         const todaySales = openSales.filter(s => {
             if (!s.transactionDate) return false;
             try {
-                // To be a "today sale" for reconciliation, it must be open AND created today.
                 return isToday(new Date(s.transactionDate));
             } catch (e) {
                 console.error("Invalid date format for sale:", s.id, s.transactionDate);
                 return false;
             }
         });
-        
-        const totalSalesToday = todaySales.reduce((sum, s) => sum + s.totalAmount, 0);
-        const profitToday = calculateProfit(todaySales);
+        return { todaySales };
+    }, [sales]);
 
-        const weekSales = openSales.filter(s => {
-            if(!s.transactionDate) return false;
-            try {
-                return isThisWeek(new Date(s.transactionDate), { weekStartsOn: 1 })
-            } catch (e) {
-                return false;
-            }
-        });
-        const totalSalesWeek = weekSales.reduce((sum, s) => sum + s.totalAmount, 0);
-        const profitWeek = calculateProfit(weekSales);
-
-        return {
-            todaySales,
-            totalSalesToday,
-            profitToday,
-            weekSales,
-            totalSalesWeek,
-            profitWeek
-        };
-    }, [sales, products]);
-
-    
-    const currentSymbol = getSymbol();
 
     return (
         <Tabs defaultValue="summary">
@@ -114,28 +63,14 @@ export function ReportsView({ sales, products, repairJobs, isLoading }: ReportsV
             </TabsList>
             <TabsContent value="summary" className="space-y-4 mt-4">
                  <CashReconciliationDialog openSales={todaySales} />
-                 <div className="grid gap-4 md:grid-cols-2">
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>Ventas de Hoy (Abiertas)</CardTitle>
-                            <CardDescription>{todaySales.length} transacciones sin cerrar</CardDescription>
-                        </CardHeader>
-                        <CardContent className="space-y-2">
-                            {isLoading ? <Skeleton className="h-8 w-32 mb-2" /> : <p className="text-2xl font-bold">{currentSymbol}{formatCurrency(totalSalesToday)}</p>}
-                            {isLoading ? <Skeleton className="h-5 w-24" /> : <p className="text-sm text-muted-foreground">Ganancia: <span className="text-green-600">{currentSymbol}{formatCurrency(profitToday)}</span></p>}
-                        </CardContent>
-                    </Card>
-                     <Card>
-                        <CardHeader>
-                            <CardTitle>Ventas de la Semana (Abiertas)</CardTitle>
-                            <CardDescription>{weekSales.length} transacciones sin cerrar</CardDescription>
-                        </CardHeader>
-                        <CardContent className="space-y-2">
-                            {isLoading ? <Skeleton className="h-8 w-32 mb-2" /> : <p className="text-2xl font-bold">{currentSymbol}{formatCurrency(totalSalesWeek)}</p>}
-                            {isLoading ? <Skeleton className="h-5 w-24" /> : <p className="text-sm text-muted-foreground">Ganancia: <span className="text-green-600">{currentSymbol}{formatCurrency(profitWeek)}</span></p>}
-                        </CardContent>
-                    </Card>
-                 </div>
+                 
+                 <DateRangeReport 
+                    sales={sales} 
+                    products={products} 
+                    reconciliations={reconciliations || []}
+                    isLoading={isLoading || reconciliationsLoading}
+                 />
+                 
                  <Card>
                     <CardHeader>
                         <CardTitle>Exportar Ventas</CardTitle>

@@ -7,7 +7,7 @@ import { AppLockProvider } from '@/contexts/app-lock-context';
 import { AppLock } from '@/components/app-lock';
 
 export const metadata: Metadata = {
-  title: 'Mariche Movil',
+  title: 'MARICHE MOVIL',
   description: 'Inventario y POS para Tiendas de Reparación de Móviles',
   manifest: '/manifest.json',
 };
@@ -35,3 +35,5 @@ export default function RootLayout({
     </html>
   );
 }
+
+    
