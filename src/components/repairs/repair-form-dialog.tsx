@@ -33,7 +33,7 @@ import { useCurrency } from "@/hooks/use-currency";
 import { Checkbox } from "../ui/checkbox";
 import { Label } from "../ui/label";
 import { useFirebase, setDocumentNonBlocking, addDocumentNonBlocking, useCollection, useMemoFirebase } from "@/firebase";
-import { collection, doc, writeBatch, query, where, getDocs, getDoc } from "firebase/firestore";
+import { collection, doc, writeBatch, query, where, getDocs, getDoc, runTransaction } from "firebase/firestore";
 import { handlePrintTicket } from "./repair-ticket";
 import { AlertCircle, Info, Printer, Search, TicketPercent, UserSearch } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
@@ -73,7 +73,7 @@ const formSchema = z.object({
   reportedIssue: z.string().min(5, "La descripción del problema es obligatoria."),
   initialConditionsChecklist: z.array(z.string()).optional(),
   estimatedCost: z.coerce.number().min(0),
-  amountPaid: z.coerce.number().min(0),
+  abono: z.coerce.number().min(0).optional(),
   isPaid: z.boolean(),
   status: z.enum(repairStatuses),
   notes: z.string().optional(),
@@ -102,7 +102,7 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
   const [customerSearchQuery, setCustomerSearchQuery] = useState("");
   
   const [partsPopoverOpen, setPartsPopoverOpen] = useState(false);
-  const [amountPaidInBs, setAmountPaidInBs] = useState<number | string>("");
+  const [abonoInBs, setAbonoInBs] = useState<number | string>("");
 
 
   const { toast } = useToast();
@@ -127,7 +127,7 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
     defaultValues: {
       customerName: "", customerPhone: "", customerID: "", customerAddress: "",
       deviceMake: "", deviceModel: "", deviceImei: "", reportedIssue: "",
-      initialConditionsChecklist: [], estimatedCost: 0, amountPaid: 0,
+      initialConditionsChecklist: [], estimatedCost: 0, abono: 0,
       isPaid: false, status: "Pendiente", notes: "", reservedParts: [],
     },
   });
@@ -249,7 +249,7 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
         setWarrantyInfo(null);
         setMainPart(null);
         setUsePromoPrice(false);
-        setAmountPaidInBs("");
+        setAbonoInBs("");
         setCustomerSearchQuery("");
         setIsCustomerSearchOpen(false);
         setDuplicateIdError(null);
@@ -263,7 +263,7 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
                 initialConditionsChecklist: repairJob.initialConditionsChecklist || [],
                 notes: repairJob.notes ?? "",
                 estimatedCost: repairJob.estimatedCost || 0,
-                amountPaid: repairJob.amountPaid || 0,
+                abono: repairJob.amountPaid || 0, // Map amountPaid to abono
                 isPaid: repairJob.isPaid || false,
                 reservedParts: repairJob.reservedParts || [],
             });
@@ -275,7 +275,7 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
             form.reset({
                 customerName: "", customerPhone: "", customerID: "", customerAddress: "",
                 deviceMake: "", deviceModel: "", deviceImei: "", reportedIssue: "",
-                initialConditionsChecklist: [], estimatedCost: 0, amountPaid: 0,
+                initialConditionsChecklist: [], estimatedCost: 0, abono: 0,
                 isPaid: false, status: "Pendiente", notes: "", reservedParts: [],
             });
         }
@@ -317,88 +317,96 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
         return;
     }
 
-    const batch = writeBatch(firestore);
-    
-    // Un-reserve original parts if editing
-    if (repairJob && repairJob.reservedParts) {
-        for (const part of repairJob.reservedParts) {
-            const productRef = doc(firestore, "products", part.productId);
-            const productDoc = await getDoc(productRef);
-            if (productDoc.exists()) {
-                const currentReserved = productDoc.data().reservedStock || 0;
-                batch.update(productRef, { reservedStock: Math.max(0, currentReserved - part.quantity) });
-            }
-        }
-    }
+    try {
+        await runTransaction(firestore, async (transaction) => {
+            const oldParts = repairJob?.reservedParts || [];
+            const newParts = values.reservedParts || [];
 
-    // Reserve new parts
-    for (const part of values.reservedParts) {
-        const productRef = doc(firestore, "products", part.productId);
-        const productDoc = await getDoc(productRef);
-        if (productDoc.exists()) {
-            const productData = productDoc.data();
-            const currentReserved = productData.reservedStock || 0;
-            const availableStock = productData.stockLevel - currentReserved;
+            // Un-reserve old parts that are no longer in the new list
+            for (const oldPart of oldParts) {
+                if (!newParts.some(p => p.productId === oldPart.productId)) {
+                    const productRef = doc(firestore, "products", oldPart.productId);
+                    const productDoc = await transaction.get(productRef);
+                    if (productDoc.exists()) {
+                        const currentReserved = productDoc.data().reservedStock || 0;
+                        transaction.update(productRef, { reservedStock: Math.max(0, currentReserved - oldPart.quantity) });
+                    }
+                }
+            }
             
-            if (availableStock < part.quantity && !(repairJob?.reservedParts?.some(p => p.productId === part.productId))) {
-                 toast({
-                    variant: "destructive",
-                    title: "Stock Insuficiente",
-                    description: `No hay suficiente stock disponible para la pieza "${part.productName}".`
-                });
-                return; // Stop submission
+            // Reserve new parts
+            for (const newPart of newParts) {
+                // Only reserve if it's a new part for this job
+                if (!oldParts.some(p => p.productId === newPart.productId)) {
+                    const productRef = doc(firestore, "products", newPart.productId);
+                    const productDoc = await transaction.get(productRef);
+                    if (!productDoc.exists()) throw new Error(`La pieza ${newPart.productName} no se encuentra en el inventario.`);
+
+                    const productData = productDoc.data();
+                    const availableStock = productData.stockLevel - (productData.reservedStock || 0);
+
+                    if (availableStock < newPart.quantity) {
+                        throw new Error(`Stock insuficiente para "${newPart.productName}". Disponible: ${availableStock}.`);
+                    }
+                    const currentReserved = productData.reservedStock || 0;
+                    transaction.update(productRef, { reservedStock: currentReserved + newPart.quantity });
+                }
             }
-            batch.update(productRef, { reservedStock: currentReserved + part.quantity });
-        }
-    }
 
+            const wasCompleted = repairJob?.status === 'Completado';
+            const isNowCompleted = values.status === 'Completado';
+            let completionData: Partial<RepairJob> = {};
 
-    const wasCompleted = repairJob?.status === 'Completado';
-    const isNowCompleted = values.status === 'Completado';
-    let completionData: Partial<RepairJob> = {};
+            if (isNowCompleted && !wasCompleted) {
+                const completionDate = new Date();
+                completionData = {
+                    completedAt: completionDate.toISOString(),
+                    warrantyEndDate: addDays(completionDate, 4).toISOString()
+                };
+            }
+            
+            const amountPaid = values.abono || 0;
+            const isPaid = amountPaid >= values.estimatedCost && values.estimatedCost > 0;
+            const finalValues = { ...values, amountPaid, isPaid, notes: values.notes || "" };
 
-    if (isNowCompleted && !wasCompleted) {
-        const completionDate = new Date();
-        completionData = {
-            completedAt: completionDate.toISOString(),
-            warrantyEndDate: addDays(completionDate, 4).toISOString()
-        };
-         toast({
-            title: 'Trabajo Completado y Garantía Iniciada',
-            description: `La garantía de 4 días para la reparación ha comenzado.`,
+            if (repairJob) {
+                const jobRef = doc(firestore, 'repair_jobs', repairJob.id!);
+                transaction.set(jobRef, { ...finalValues, ...completionData }, { merge: true });
+            } else {
+                const jobId = generateJobId();
+                const newJobData = { ...finalValues, id: jobId, createdAt: new Date().toISOString(), ...completionData };
+                const jobRef = doc(firestore, 'repair_jobs', jobId);
+                transaction.set(jobRef, newJobData);
+                
+                // Return new job data for printing
+                return newJobData;
+            }
+        }).then((newJobData) => {
+            if (newJobData) { // This means it was a new job
+                const fullJobData: RepairJob = {
+                    ...newJobData,
+                    partsCost: 0, 
+                    laborCost: 0,
+                };
+                onPrint(fullJobData, 'client');
+                toast({ title: "Trabajo de Reparación Creado", description: `Nuevo trabajo para ${values.customerName} ha sido registrado.` });
+            } else { // This means it was an update
+                toast({ title: "Trabajo de Reparación Actualizado", description: `El trabajo para ${values.customerName} ha sido actualizado.` });
+            }
+            setOpen(false);
         });
-    }
-
-    const isPaid = values.amountPaid >= values.estimatedCost && values.estimatedCost > 0;
-    const finalValues = { ...values, isPaid, notes: values.notes || "" };
-    
-    if (repairJob) {
-      const jobRef = doc(firestore, 'repair_jobs', repairJob.id!);
-      batch.set(jobRef, { ...finalValues, ...completionData }, { merge: true });
-      await batch.commit();
-      toast({ title: "Trabajo de Reparación Actualizado", description: `El trabajo para ${values.customerName} ha sido actualizado.` });
-      setOpen(false);
-    } else {
-      const jobId = generateJobId();
-      const newJobData = { ...finalValues, id: jobId, createdAt: new Date().toISOString(), ...completionData };
-      const jobRef = doc(firestore, 'repair_jobs', jobId);
-      batch.set(jobRef, newJobData);
-      await batch.commit();
-      setOpen(false);
-
-      const fullJobData: RepairJob = { 
-          ...newJobData,
-          partsCost: 0, 
-          laborCost: 0,
-      };
-
-      onPrint(fullJobData, 'client');
-      toast({ title: "Trabajo de Reparación Creado", description: `Nuevo trabajo para ${values.customerName} ha sido registrado.` });
+    } catch (error: any) {
+        console.error("Error al guardar la reparación:", error);
+        toast({
+            variant: "destructive",
+            title: "Error al Guardar",
+            description: error.message || "No se pudo guardar la reparación. Por favor, inténtalo de nuevo.",
+        });
     }
   }
   
   const estimatedCost = form.watch('estimatedCost');
-  const amountPaid = form.watch('amountPaid');
+  const abono = form.watch('abono') || 0;
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -641,7 +649,7 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
                     </div>
                     
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
-                         <FormField control={form.control} name="amountPaid" render={({ field }) => (
+                         <FormField control={form.control} name="abono" render={({ field }) => (
                             <FormItem>
                                 <FormLabel>Abono ({getSymbol()})</FormLabel>
                                 <FormControl>
@@ -649,7 +657,12 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
                                         type="number" 
                                         step="0.01" 
                                         {...field}
-                                        disabled={!!repairJob}
+                                        onChange={(e) => {
+                                            const usdValue = parseFloat(e.target.value) || 0;
+                                            field.onChange(usdValue);
+                                            const bsValue = convert(usdValue, 'USD', 'Bs');
+                                            setAbonoInBs(bsValue > 0 ? bsValue.toFixed(2) : "");
+                                        }}
                                     />
                                 </FormControl>
                                 <FormMessage />
@@ -660,21 +673,22 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
                              <Input 
                                 type="number" 
                                 step="0.01" 
-                                value={amountPaidInBs}
+                                value={abonoInBs}
                                 onChange={(e) => {
                                     const bsValue = parseFloat(e.target.value) || 0;
-                                    setAmountPaidInBs(e.target.value);
+                                    setAbonoInBs(e.target.value);
                                     const usdValue = convert(bsValue, 'Bs', 'USD');
-                                    form.setValue('amountPaid', parseFloat(usdValue.toFixed(2)));
+                                    form.setValue('abono', parseFloat(usdValue.toFixed(2)));
                                 }}
-                                disabled={!!repairJob}
                             />
                         </div>
                     </div>
 
-                    <div className="text-sm text-destructive font-semibold text-right p-2 bg-muted rounded-md flex items-center justify-end">
-                        <span>Saldo Pendiente: {getSymbol()}{Math.max(0, estimatedCost - amountPaid).toFixed(2)}</span>
+                     <div className="text-sm text-destructive font-semibold text-right p-2 bg-muted rounded-md flex items-center justify-between">
+                        <span>Saldo Pendiente:</span>
+                        <span>{getSymbol()}{Math.max(0, estimatedCost - abono).toFixed(2)}</span>
                     </div>
+
                     <FormField control={form.control} name="status" render={({ field }) => (
                         <FormItem><FormLabel>Estado</FormLabel>
                             <Select onValueChange={field.onChange} value={field.value} disabled={repairJob?.status === 'Completado'}>

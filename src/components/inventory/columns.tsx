@@ -1,4 +1,5 @@
 
+
 "use client"
 
 import type { ColumnDef } from "@tanstack/react-table"
@@ -222,13 +223,15 @@ export const columns: ColumnDef<Product>[] = [
                   ...comboItems.map(item => {
                       const component = allProducts.find(p => p.id === item.productId);
                       if (!component) return 0;
-                      const componentAvailable = component.stockLevel - (component.reservedStock || 0);
+                      // Available = Total - Reserved - Damaged
+                      const componentAvailable = component.stockLevel - (component.reservedStock || 0) - (component.damagedStock || 0);
                       return Math.floor(componentAvailable / item.quantity);
                   })
               );
           }
       } else {
-          availableStock = product.stockLevel - (product.reservedStock || 0);
+          // Available = Total - Reserved - Damaged
+          availableStock = product.stockLevel - (product.reservedStock || 0) - (product.damagedStock || 0);
       }
       
       const threshold = product.lowStockThreshold;
@@ -310,3 +313,5 @@ export const columns: ColumnDef<Product>[] = [
     cell: ({ row }) => <ActionsCell product={row.original} />,
   },
 ]
+
+    

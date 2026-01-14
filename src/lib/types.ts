@@ -129,5 +129,3 @@ export type AppSettings = {
     profitMargin: number; // Margen de Ganancia
     lastUpdated?: string; // ISO 8601 date string
 };
-
-    

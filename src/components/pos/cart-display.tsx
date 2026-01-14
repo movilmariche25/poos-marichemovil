@@ -97,48 +97,53 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
       const cartWithFinalPrices = cart.map(item => ({
         ...item,
         price: getPrice(item),
-        // If it's a repair, we enrich the name for the final receipt
         name: item.isRepair && activeRepairJob 
             ? `Reparación: ${activeRepairJob.deviceMake} ${activeRepairJob.deviceModel} (Costo Total: ${getSymbol()}${formatCurrency(activeRepairJob.estimatedCost)}, Pagado: ${getSymbol()}${formatCurrency(activeRepairJob.amountPaid || 0)})`
             : item.name
       }));
 
       for (const item of cartWithFinalPrices) {
+          if (item.isRepair) continue;
+
           const product = allProducts.find(p => p.id === item.productId);
           if (!product) continue;
           
-          if (!item.isRepair) {
-              if (product.isCombo && product.comboItems) {
-                  for (const comboItem of product.comboItems) {
-                      const componentProductRef = doc(firestore, 'products', comboItem.productId);
-                      const componentProductDoc = await getDoc(componentProductRef);
-                      if (componentProductDoc.exists()) {
-                          const componentProductData = componentProductDoc.data();
-                          const newStock = componentProductData.stockLevel - (comboItem.quantity * item.quantity);
-                          batch.update(componentProductRef, { stockLevel: newStock });
-                      }
+          if (product.isCombo && product.comboItems) {
+              for (const comboItem of product.comboItems) {
+                  const componentProductRef = doc(firestore, 'products', comboItem.productId);
+                  const componentProductDoc = await getDoc(componentProductRef);
+                  if (componentProductDoc.exists()) {
+                      const componentProductData = componentProductDoc.data() as Product;
+                      // Don't touch stockLevel. Increase reservedStock to mark as "sold".
+                      const newReservedStock = (componentProductData.reservedStock || 0) + (comboItem.quantity * item.quantity);
+                      batch.update(componentProductRef, { reservedStock: newReservedStock });
                   }
-              } else if (!product.isCombo) {
-                  const productRef = doc(firestore, 'products', item.productId);
-                  const newStock = product.stockLevel - item.quantity;
-                  batch.update(productRef, { stockLevel: newStock });
               }
+          } else {
+              const productRef = doc(firestore, 'products', item.productId);
+              // Don't touch stockLevel. Increase reservedStock to mark as "sold".
+              const newReservedStock = (product.reservedStock || 0) + item.quantity;
+              batch.update(productRef, { reservedStock: newReservedStock });
           }
       }
       
       if (repairJobId) {
         const repairJobRef = doc(firestore, 'repair_jobs', repairJobId);
         const repairJobDoc = await getDoc(repairJobRef);
-        const repairJobData = repairJobDoc.data();
+        const repairJobData = repairJobDoc.data() as RepairJob;
         
         if (repairJobData) {
+            // When paying for a repair, the parts are "consumed".
+            // We decrease the reserved stock (as it's no longer reserved)
+            // but DO NOT touch the total stockLevel. The part is just "gone".
             if (repairJobData.reservedParts && repairJobData.reservedParts.length > 0) {
                 for (const part of repairJobData.reservedParts) {
                     const productRef = doc(firestore, 'products', part.productId);
                     const productDoc = await getDoc(productRef);
                     if (productDoc.exists()) {
-                        const productData = productDoc.data();
+                        const productData = productDoc.data() as Product;
                         const newReservedStock = (productData.reservedStock || 0) - part.quantity;
+                        
                         batch.update(productRef, { 
                             reservedStock: newReservedStock < 0 ? 0 : newReservedStock 
                         });
@@ -308,3 +313,5 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
     </div>
   );
 }
+
+    

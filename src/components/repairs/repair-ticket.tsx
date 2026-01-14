@@ -10,6 +10,7 @@ type RepairTicketProps = {
 }
 
 export function RepairTicket({ repairJob, variant }: RepairTicketProps) {
+    const abono = repairJob.amountPaid || 0;
     
     // Internal Ticket
     if (variant === 'internal') {
@@ -54,10 +55,10 @@ export function RepairTicket({ repairJob, variant }: RepairTicketProps) {
 
                 <div className="text-right space-y-1">
                     <p><span className="font-semibold">Costo Estimado:</span> ${repairJob.estimatedCost.toFixed(2)}</p>
-                    {repairJob.amountPaid > 0 && (
+                    {abono > 0 && (
                         <>
-                            <p><span className="font-semibold">Abono:</span> ${repairJob.amountPaid.toFixed(2)}</p>
-                            <p className="font-bold"><span className="font-semibold">Saldo Pendiente:</span> ${Math.max(0, repairJob.estimatedCost - repairJob.amountPaid).toFixed(2)}</p>
+                            <p><span className="font-semibold">Abono:</span> ${abono.toFixed(2)}</p>
+                            <p className="font-bold"><span className="font-semibold">Saldo Pendiente:</span> ${Math.max(0, repairJob.estimatedCost - abono).toFixed(2)}</p>
                         </>
                     )}
                 </div>
@@ -117,10 +118,10 @@ export function RepairTicket({ repairJob, variant }: RepairTicketProps) {
 
             <div className="text-right space-y-1">
                 <p><span className="font-semibold">Costo Estimado:</span> ${repairJob.estimatedCost.toFixed(2)}</p>
-                {repairJob.amountPaid > 0 && (
+                {abono > 0 && (
                     <>
-                        <p><span className="font-semibold">Abono:</span> ${repairJob.amountPaid.toFixed(2)}</p>
-                        <p className="font-bold"><span className="font-semibold">Saldo Pendiente:</span> ${Math.max(0, repairJob.estimatedCost - repairJob.amountPaid).toFixed(2)}</p>
+                        <p><span className="font-semibold">Abono:</span> ${abono.toFixed(2)}</p>
+                        <p className="font-bold"><span className="font-semibold">Saldo Pendiente:</span> ${Math.max(0, repairJob.estimatedCost - abono).toFixed(2)}</p>
                     </>
                 )}
             </div>
@@ -185,5 +186,3 @@ export const handlePrintTicket = (props: RepairTicketProps, onError: (message: s
         onError("No se pudo abrir la ventana de impresión. Revisa si tu navegador está bloqueando las ventanas emergentes.");
     }
 };
-
-    

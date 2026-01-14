@@ -31,7 +31,7 @@ import { es } from "date-fns/locale"
 import { useCurrency } from "@/hooks/use-currency"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select"
 import { useFirebase, updateDocumentNonBlocking, deleteDocumentNonBlocking } from "@/firebase"
-import { doc, writeBatch, getDoc } from "firebase/firestore"
+import { doc, writeBatch, getDoc, runTransaction } from "firebase/firestore"
 import { handlePrintTicket } from "./repair-ticket"
 import { AdminAuthDialog } from "../admin-auth-dialog"
 import { useState } from "react"
@@ -66,25 +66,25 @@ const ActionsCell = ({ repairJob }: { repairJob: RepairJob }) => {
         if (!firestore || !repairJob.id) return;
         
         try {
-            const batch = writeBatch(firestore);
-            const jobRef = doc(firestore, 'repair_jobs', repairJob.id);
+            await runTransaction(firestore, async (transaction) => {
+                const jobRef = doc(firestore, 'repair_jobs', repairJob.id!);
 
-            // Devolver las piezas reservadas al stock
-            if (repairJob.reservedParts && repairJob.reservedParts.length > 0) {
-                for (const part of repairJob.reservedParts) {
-                    const productRef = doc(firestore, 'products', part.productId);
-                    const productDoc = await getDoc(productRef);
-                    if (productDoc.exists()) {
-                        const productData = productDoc.data();
-                        const currentReservedStock = productData.reservedStock || 0;
-                        const newReservedStock = Math.max(0, currentReservedStock - part.quantity);
-                        batch.update(productRef, { reservedStock: newReservedStock });
+                // Devolver las piezas reservadas al stock
+                if (repairJob.reservedParts && repairJob.reservedParts.length > 0) {
+                    for (const part of repairJob.reservedParts) {
+                        const productRef = doc(firestore, 'products', part.productId);
+                        const productDoc = await transaction.get(productRef);
+                        if (productDoc.exists()) {
+                            const productData = productDoc.data();
+                            const currentReservedStock = productData.reservedStock || 0;
+                            const newReservedStock = Math.max(0, currentReservedStock - part.quantity);
+                            transaction.update(productRef, { reservedStock: newReservedStock });
+                        }
                     }
                 }
-            }
 
-            batch.delete(jobRef);
-            await batch.commit();
+                transaction.delete(jobRef);
+            });
 
             toast({
                 title: "Trabajo de Reparación Eliminado",
@@ -92,10 +92,10 @@ const ActionsCell = ({ repairJob }: { repairJob: RepairJob }) => {
                 variant: "destructive"
             });
 
-        } catch (error) {
+        } catch (error: any) {
              toast({
                 title: "Error al eliminar",
-                description: "No se pudo eliminar el trabajo de reparación. Inténtalo de nuevo.",
+                description: error.message || "No se pudo eliminar el trabajo de reparación. Inténtalo de nuevo.",
                 variant: "destructive"
             });
             console.error("Error deleting repair job:", error);

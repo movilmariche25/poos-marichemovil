@@ -18,7 +18,7 @@ import { Skeleton } from "../ui/skeleton";
 import { AdminAuthDialog } from "../admin-auth-dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "../ui/alert-dialog";
 import { useFirebase, useCollection, useMemoFirebase } from "@/firebase";
-import { doc, writeBatch, collection } from "firebase/firestore";
+import { doc, writeBatch, collection, runTransaction } from "firebase/firestore";
 import { Badge } from "../ui/badge";
 import { cn } from "@/lib/utils";
 import { Textarea } from "../ui/textarea";
@@ -37,14 +37,8 @@ const RefundButton = ({ sale }: { sale: Sale }) => {
     const [refundReason, setRefundReason] = useState("");
     const [stockAction, setStockAction] = useState<'return' | 'damage'>('return');
     
-    const productsCollection = useMemoFirebase(() => 
-        firestore ? collection(firestore, 'products') : null,
-        [firestore]
-    );
-    const { data: products } = useCollection<Product>(productsCollection);
-
     const handleRefund = async () => {
-        if (!firestore || !products || !sale.id || !refundReason.trim()) {
+        if (!firestore || !sale.id || !refundReason.trim()) {
              toast({
                 variant: "destructive",
                 title: "Error",
@@ -53,39 +47,46 @@ const RefundButton = ({ sale }: { sale: Sale }) => {
             return;
         }
         
-        const batch = writeBatch(firestore);
-
-        // 1. Update product stock based on user selection
-        for (const item of sale.items) {
-            if (!item.isRepair) {
-                const productRef = doc(firestore, 'products', item.productId);
-                const product = products.find(p => p.id === item.productId);
-                if (product) {
-                    if (stockAction === 'return') {
-                         const newStockLevel = product.stockLevel + item.quantity;
-                         batch.update(productRef, { stockLevel: newStockLevel });
-                    } else { // 'damage'
-                        const newDamagedStock = (product.damagedStock || 0) + item.quantity;
-                        batch.update(productRef, { damagedStock: newDamagedStock });
+        try {
+            await runTransaction(firestore, async (transaction) => {
+                // 1. Update product stock based on user selection
+                for (const item of sale.items) {
+                    if (!item.isRepair) {
+                        const productRef = doc(firestore, 'products', item.productId);
+                        const productDoc = await transaction.get(productRef);
+                        if (productDoc.exists()) {
+                            const product = productDoc.data() as Product;
+                            if (stockAction === 'return') {
+                                 // When returning, we just decrease the reservedStock that was increased during sale
+                                 const newReservedStock = (product.reservedStock || 0) - item.quantity;
+                                 transaction.update(productRef, { reservedStock: Math.max(0, newReservedStock) });
+                            } else { // 'damage'
+                                // When damaging, we decrease reserved and increase damaged
+                                const newReservedStock = (product.reservedStock || 0) - item.quantity;
+                                const newDamagedStock = (product.damagedStock || 0) + item.quantity;
+                                transaction.update(productRef, { 
+                                    reservedStock: Math.max(0, newReservedStock),
+                                    damagedStock: newDamagedStock 
+                                });
+                            }
+                        }
                     }
                 }
-            }
-        }
 
-        // 2. Mark sale as refunded with reason
-        const saleRef = doc(firestore, 'sale_transactions', sale.id);
-        batch.update(saleRef, {
-            status: 'refunded',
-            refundedAt: new Date().toISOString(),
-            refundReason: refundReason
-        });
+                // 2. Mark sale as refunded with reason
+                const saleRef = doc(firestore, 'sale_transactions', sale.id!);
+                transaction.update(saleRef, {
+                    status: 'refunded',
+                    refundedAt: new Date().toISOString(),
+                    refundReason: refundReason
+                });
+            });
 
-        try {
-            await batch.commit();
             toast({
                 title: "Reembolso Completado",
                 description: `La venta ${sale.id} ha sido marcada como reembolsada.`
             });
+
         } catch (error) {
             console.error("Error al procesar el reembolso:", error);
             toast({
@@ -149,7 +150,7 @@ const RefundButton = ({ sale }: { sale: Sale }) => {
                                 </div>
                                 <div className="flex items-center space-x-2">
                                     <RadioGroupItem value="damage" id="r2" />
-                                    <Label htmlFor="r2">Mover a Stock Dañado</Label>
+                                    <Label htmlFor="r2">Mover a Stock Dañado/Consumido</Label>
                                 </div>
                             </RadioGroup>
                         </div>
@@ -321,3 +322,5 @@ export function TransactionList({ sales, isLoading }: TransactionListProps) {
         </Accordion>
     )
 }
+
+    
