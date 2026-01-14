@@ -24,7 +24,9 @@ export const useCurrency = () => {
         
         let displayValue = value;
         
-        const formatter = new Intl.NumberFormat('es-VE', {
+        // Using 'de-DE' locale to enforce dot for thousands and comma for decimals,
+        // which is the standard format used in Venezuela. 'es-VE' is inconsistent across browsers.
+        const formatter = new Intl.NumberFormat('de-DE', {
             style: 'decimal',
             minimumFractionDigits: 2,
             maximumFractionDigits: 2,
