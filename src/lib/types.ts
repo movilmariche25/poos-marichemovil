@@ -54,7 +54,7 @@ export type RepairJob = {
   status: RepairStatus;
   notes?: string;
   createdAt: string;
-  reservedParts: ReservedPart[];
+  reservedParts?: ReservedPart[];
   completedAt?: string;
   warrantyEndDate?: string;
 };

@@ -1,5 +1,4 @@
 
-
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -26,7 +25,7 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import type { RepairJob, RepairStatus, Product } from "@/lib/types";
-import { useState, type ReactNode, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, ReactNode } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { Textarea } from "../ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
@@ -36,7 +35,7 @@ import { Label } from "../ui/label";
 import { useFirebase, setDocumentNonBlocking, addDocumentNonBlocking, useCollection, useMemoFirebase } from "@/firebase";
 import { collection, doc, writeBatch, query, where, getDocs, getDoc } from "firebase/firestore";
 import { handlePrintTicket } from "./repair-ticket";
-import { AlertCircle, Info, Printer, Search, Trash2, UserSearch, TicketPercent } from "lucide-react";
+import { AlertCircle, Info, Printer, Search, TicketPercent, UserSearch, UserPlus, ArrowRight } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "../ui/command";
 import { format, addDays } from "date-fns";
@@ -44,6 +43,8 @@ import { useDebounce } from "use-debounce";
 import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
 import { es } from "date-fns/locale";
 import { cn } from "@/lib/utils";
+import { useRouter } from "next/navigation";
+
 
 const repairStatuses: RepairStatus[] = ['Pendiente', 'Completado'];
 const initialChecklistItems = [
@@ -83,7 +84,7 @@ const formSchema = z.object({
 type RepairFormData = z.infer<typeof formSchema>;
 
 type RepairFormDialogProps = {
-  repairJob?: RepairJob;
+  repairJob?: RepairJob | null;
   children: ReactNode;
 };
 
@@ -97,8 +98,12 @@ function generateJobId() {
 export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps) {
   const { firestore } = useFirebase();
   const [open, setOpen] = useState(false);
+  
   const [partsPopoverOpen, setPartsPopoverOpen] = useState(false);
-  const [customerPopoverOpen, setCustomerPopoverOpen] = useState(false);
+  const [customerSearchPopoverOpen, setCustomerSearchPopoverOpen] = useState(false);
+  const [amountPaidInBs, setAmountPaidInBs] = useState<number | string>("");
+
+
   const { toast } = useToast();
   const { getSymbol, format: formatCurrency, getDynamicPrice, convert } = useCurrency();
   const [warrantyInfo, setWarrantyInfo] = useState<{ message: string; date: string } | null>(null);
@@ -114,14 +119,13 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
 
   const isReadOnly = repairJob?.status === 'Completado' && repairJob?.isPaid;
 
-
   const uniqueCustomers = useMemo(() => {
     if (!allRepairJobs) return [];
     const customerMap = new Map<string, { name: string; phone: string; id?: string; address?: string }>();
     for (let i = allRepairJobs.length - 1; i >= 0; i--) {
         const job = allRepairJobs[i];
-        if (job.customerPhone && !customerMap.has(job.customerPhone)) {
-            customerMap.set(job.customerPhone, { 
+        if (job.customerName && !customerMap.has(job.customerName.toLowerCase())) {
+            customerMap.set(job.customerName.toLowerCase(), { 
                 name: job.customerName, 
                 phone: job.customerPhone,
                 id: job.customerID,
@@ -135,26 +139,28 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
   const form = useForm<RepairFormData>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      customerName: "",
-      customerPhone: "",
-      customerID: "",
-      customerAddress: "",
-      deviceMake: "",
-      deviceModel: "",
-      deviceImei: "",
-      reportedIssue: "",
-      initialConditionsChecklist: [],
-      estimatedCost: 0,
-      amountPaid: 0,
-      isPaid: false,
-      status: "Pendiente",
-      notes: "",
-      reservedParts: [],
+      customerName: "", customerPhone: "", customerID: "", customerAddress: "",
+      deviceMake: "", deviceModel: "", deviceImei: "", reportedIssue: "",
+      initialConditionsChecklist: [], estimatedCost: 0, amountPaid: 0,
+      isPaid: false, status: "Pendiente", notes: "", reservedParts: [],
     },
   });
-  
+
   const imeiValue = form.watch('deviceImei');
   const [debouncedImei] = useDebounce(imeiValue, 500); 
+
+  const handleBsToUsdConversion = (bsAmountStr: string) => {
+    setAmountPaidInBs(bsAmountStr);
+    const bsAmount = parseFloat(bsAmountStr);
+    if (!isNaN(bsAmount) && bsAmount > 0) {
+        const usdAmount = convert(bsAmount, 'Bs', 'USD');
+        form.setValue('amountPaid', parseFloat(usdAmount.toFixed(2)));
+    } else if (bsAmountStr === "") {
+        // If user clears the Bs field, we don't automatically clear the USD field
+        // they might want to enter USD directly.
+    }
+  };
+
 
   useEffect(() => {
     if (!mainPart) {
@@ -169,7 +175,6 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
 
     form.setValue('estimatedCost', price);
 
-    // Also update the reserved parts to include the main part
     form.setValue('reservedParts', [{
         productId: mainPart.id!,
         productName: mainPart.name,
@@ -225,6 +230,7 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
         setWarrantyInfo(null);
         setMainPart(null);
         setUsePromoPrice(false);
+        setAmountPaidInBs("");
 
         if (repairJob) {
             form.reset({
@@ -244,25 +250,14 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
             }
         } else {
             form.reset({
-                customerName: "",
-                customerPhone: "",
-                customerID: "",
-                customerAddress: "",
-                deviceMake: "",
-                deviceModel: "",
-                deviceImei: "",
-                reportedIssue: "",
-                initialConditionsChecklist: [],
-                estimatedCost: 0,
-                amountPaid: 0,
-                isPaid: false,
-                status: "Pendiente",
-                notes: "",
-                reservedParts: [],
+                customerName: "", customerPhone: "", customerID: "", customerAddress: "",
+                deviceMake: "", deviceModel: "", deviceImei: "", reportedIssue: "",
+                initialConditionsChecklist: [], estimatedCost: 0, amountPaid: 0,
+                isPaid: false, status: "Pendiente", notes: "", reservedParts: [],
             });
         }
     }
-  }, [repairJob, form, open, products]);
+  }, [repairJob, form, products, open]);
 
   const onPrint = (job: RepairJob) => {
     handlePrintTicket({ repairJob: job }, (error) => {
@@ -359,7 +354,7 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
       
       const fullJobData: RepairJob = { 
           ...newJobData,
-          partsCost: 0, // Fill in required fields that might be missing from form
+          partsCost: 0, 
           laborCost: 0,
       };
       onPrint(fullJobData);
@@ -367,7 +362,6 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
       toast({ title: "Trabajo de Reparación Creado", description: `Nuevo trabajo para ${values.customerName} ha sido registrado.` });
     }
     setOpen(false);
-    form.reset();
   }
   
   const estimatedCost = form.watch('estimatedCost');
@@ -380,241 +374,283 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
         <DialogHeader>
           <DialogTitle>{repairJob ? (isReadOnly ? 'Ver Detalles de Reparación' : 'Editar Trabajo de Reparación') : 'Registrar Nuevo Trabajo de Reparación'}</DialogTitle>
           <DialogDescription>
-            {isReadOnly ? 'Este trabajo está completado y pagado. No se puede editar.' : (repairJob ? 'Actualiza los detalles de este trabajo de reparación.' : 'Rellena los detalles para el nuevo trabajo de reparación.')}
+            {isReadOnly ? 'Este trabajo ya fue completado y pagado.' : 'Rellena los detalles para el trabajo de reparación.'}
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>
-          <form 
-            onSubmit={form.handleSubmit(onSubmit)} 
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && (e.target as HTMLElement).tagName !== 'TEXTAREA') {
-                e.preventDefault();
-              }
-            }}
-            className="space-y-4 max-h-[70vh] overflow-y-auto pr-6"
-          >
-            <fieldset disabled={isReadOnly}>
-                <legend className="text-sm font-medium mb-2 col-span-2">Información del Cliente</legend>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <FormField control={form.control} name="customerName" render={({ field }) => (
-                        <FormItem>
-                            <FormLabel>Nombre</FormLabel>
-                            <div className="flex items-center gap-2">
-                                <FormControl>
-                                    <Input placeholder="John Doe" {...field} />
-                                </FormControl>
-                                <Popover open={customerPopoverOpen} onOpenChange={setCustomerPopoverOpen}>
-                                    <PopoverTrigger asChild>
-                                        <Button type="button" variant="outline" size="icon">
-                                            <UserSearch className="w-4 h-4" />
-                                        </Button>
-                                    </PopoverTrigger>
-                                    <PopoverContent className="w-[300px] p-0">
-                                        <Command>
-                                            <CommandInput placeholder="Buscar cliente por nombre o teléfono..." />
-                                            <CommandList>
-                                                <CommandEmpty>No se encontraron clientes.</CommandEmpty>
-                                                <CommandGroup>
-                                                    {uniqueCustomers.map((customer) => (
-                                                        <CommandItem
-                                                            key={customer.phone}
-                                                            value={`${customer.name} ${customer.phone}`}
-                                                            onSelect={() => {
-                                                                form.setValue("customerName", customer.name);
-                                                                form.setValue("customerPhone", customer.phone);
-                                                                form.setValue("customerID", customer.id || "");
-                                                                form.setValue("customerAddress", customer.address || "");
-                                                                setCustomerPopoverOpen(false);
-                                                            }}
-                                                        >
-                                                            <div className="flex flex-col">
-                                                                <span>{customer.name}</span>
-                                                                <span className="text-xs text-muted-foreground">{customer.phone}</span>
-                                                            </div>
-                                                        </CommandItem>
-                                                    ))}
-                                                </CommandGroup>
-                                            </CommandList>
-                                        </Command>
-                                    </PopoverContent>
-                                </Popover>
-                            </div>
-                            <FormMessage />
-                        </FormItem>
-                    )}/>
-                    <FormField control={form.control} name="customerPhone" render={({ field }) => (
-                        <FormItem><FormLabel>Teléfono</FormLabel><FormControl><Input placeholder="555-123-4567" {...field} /></FormControl><FormMessage /></FormItem>
-                    )}/>
-                     <FormField control={form.control} name="customerID" render={({ field }) => (
-                        <FormItem><FormLabel>Cédula de Identidad</FormLabel><FormControl><Input placeholder="V-12345678" {...field} /></FormControl><FormMessage /></FormItem>
-                    )}/>
-                     <FormField control={form.control} name="customerAddress" render={({ field }) => (
-                        <FormItem><FormLabel>Dirección</FormLabel><FormControl><Input placeholder="Av. Principal, Edificio..." {...field} /></FormControl><FormMessage /></FormItem>
-                    )}/>
-                </div>
-            </fieldset>
-
-            <fieldset className="grid grid-cols-2 gap-4" disabled={isReadOnly}>
-              <legend className="text-sm font-medium mb-2 col-span-2">Información del Dispositivo</legend>
-                <FormField control={form.control} name="deviceMake" render={({ field }) => (
-                    <FormItem><FormLabel>Marca</FormLabel><FormControl><Input placeholder="Apple" {...field} /></FormControl><FormMessage /></FormItem>
-                )}/>
-                <FormField control={form.control} name="deviceModel" render={({ field }) => (
-                    <FormItem><FormLabel>Modelo</FormLabel><FormControl><Input placeholder="iPhone 14 Pro" {...field} /></FormControl><FormMessage /></FormItem>
-                )}/>
-                 <FormField control={form.control} name="deviceImei" render={({ field }) => (
-                    <FormItem className="col-span-2"><FormLabel>IMEI / Serie (Opcional)</FormLabel><FormControl><Input placeholder="123456789012345" {...field} /></FormControl><FormMessage /></FormItem>
-                )}/>
-                {warrantyInfo && (
-                    <Alert variant="destructive" className="col-span-2">
-                        <AlertCircle className="h-4 w-4" />
-                        <AlertTitle>¡Dispositivo en Garantía!</AlertTitle>
-                        <AlertDescription>
-                            {warrantyInfo.message}<br />
-                            <span className="font-semibold">{warrantyInfo.date}</span>
-                        </AlertDescription>
-                    </Alert>
-                )}
-            </fieldset>
-            
-            <FormField control={form.control} name="reportedIssue" render={({ field }) => (
-                <FormItem><FormLabel>Problema Reportado</FormLabel><FormControl><Textarea placeholder="Describe el problema..." {...field} disabled={isReadOnly} /></FormControl><FormMessage /></FormItem>
-            )}/>
-
-             <fieldset disabled={isReadOnly}>
-                <legend className="text-sm font-medium mb-2 col-span-2">Checklist de Inspección Inicial</legend>
-                <FormField
-                    control={form.control}
-                    name="initialConditionsChecklist"
-                    render={() => (
-                        <FormItem className="grid grid-cols-2 gap-x-4 gap-y-2">
-                            {initialChecklistItems.map((item) => (
-                                <FormField
-                                    key={item.id}
-                                    control={form.control}
-                                    name="initialConditionsChecklist"
-                                    render={({ field }) => {
-                                        return (
-                                        <FormItem key={item.id} className="flex flex-row items-start space-x-3 space-y-0">
-                                            <FormControl>
-                                                <Checkbox
-                                                    checked={field.value?.includes(item.label)}
-                                                    onCheckedChange={(checked) => {
-                                                        return checked
-                                                        ? field.onChange([...(field.value || []), item.label])
-                                                        : field.onChange(
-                                                            field.value?.filter(
-                                                                (value) => value !== item.label
-                                                            )
-                                                            )
-                                                    }}
-                                                />
-                                            </FormControl>
-                                            <FormLabel className="font-normal">{item.label}</FormLabel>
-                                        </FormItem>
-                                        )
-                                    }}
-                                />
-                            ))}
-                        </FormItem>
-                    )}
-                />
-            </fieldset>
-            
-            <fieldset className="space-y-4" disabled={isReadOnly}>
-                 <legend className="text-sm font-medium mb-2 col-span-2">Costos y Estado</legend>
-                 <div>
-                    <Label>Pieza Principal de la Reparación</Label>
-                    <Popover open={partsPopoverOpen} onOpenChange={setPartsPopoverOpen}>
-                        <PopoverTrigger asChild>
-                            <Button type="button" variant="outline" className="w-full justify-start text-left font-normal mt-1" disabled={isReadOnly}>
-                                {mainPart ? mainPart.name : "Seleccionar pieza principal..."}
-                            </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-[300px] p-0">
+            <form 
+                onSubmit={form.handleSubmit(onSubmit)} 
+                className="space-y-4 max-h-[70vh] overflow-y-auto pr-4"
+                onKeyDown={(e) => {
+                    if (e.key === 'Enter' && (e.target as HTMLElement).tagName !== 'TEXTAREA') {
+                        e.preventDefault();
+                    }
+                }}
+            >
+                <fieldset disabled={isReadOnly}>
+                    <div className="flex justify-between items-center mb-4">
+                        <legend className="text-lg font-semibold">Información del Cliente</legend>
+                         <Popover open={customerSearchPopoverOpen} onOpenChange={setCustomerSearchPopoverOpen}>
+                            <PopoverTrigger asChild>
+                                <Button type="button" variant="outline" size="sm">
+                                    <UserSearch className="mr-2 h-4 w-4" /> Buscar Cliente
+                                </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-[300px] p-0">
                             <Command>
-                                <CommandInput placeholder="Buscar pieza..." />
+                                <CommandInput placeholder="Buscar cliente..." />
                                 <CommandList>
-                                <CommandEmpty>No se encontraron piezas.</CommandEmpty>
+                                <CommandEmpty>No se encontraron clientes.</CommandEmpty>
                                 <CommandGroup>
-                                    {(products || []).map((product) => {
-                                        const availableStock = product.stockLevel - (product.reservedStock || 0);
-                                        return (
-                                            <CommandItem
-                                                key={product.id}
-                                                value={product.name}
-                                                onSelect={() => {
-                                                    setMainPart(product);
-                                                    setUsePromoPrice(false); // Reset promo on new part selection
-                                                    setPartsPopoverOpen(false);
-                                                }}
-                                                disabled={availableStock <= 0}
-                                                className="flex justify-between"
-                                            >
-                                                <span>{product.name}</span>
-                                                <span className="text-xs text-muted-foreground">Disp: {availableStock}</span>
-                                            </CommandItem>
-                                        )
-                                    })}
+                                    {uniqueCustomers.map((customer) => (
+                                        <CommandItem
+                                            key={customer.phone}
+                                            value={`${customer.name} ${customer.phone} ${customer.id || ''}`}
+                                            onSelect={() => {
+                                                form.setValue("customerName", customer.name);
+                                                form.setValue("customerPhone", customer.phone);
+                                                form.setValue("customerID", customer.id || "");
+                                                form.setValue("customerAddress", customer.address || "");
+                                                setCustomerSearchPopoverOpen(false);
+                                            }}
+                                        >
+                                            <div className="flex flex-col">
+                                                <span>{customer.name}</span>
+                                                <span className="text-xs text-muted-foreground">{customer.phone} - {customer.id}</span>
+                                            </div>
+                                        </CommandItem>
+                                    ))}
                                 </CommandGroup>
                                 </CommandList>
                             </Command>
-                        </PopoverContent>
-                    </Popover>
-                 </div>
-
-                <div className="col-span-2 flex items-end gap-2">
-                    <div className="flex-1">
-                        <Label>Costo Total Estimado ({getSymbol()})</Label>
-                        <Input value={formatCurrency(estimatedCost)} disabled className="font-bold text-lg h-12 mt-1" />
-                         <FormDescription>
-                            o ~Bs {formatCurrency(convert(estimatedCost, 'USD', 'Bs'), 'Bs')}
-                        </FormDescription>
+                            </PopoverContent>
+                        </Popover>
                     </div>
-                     {mainPart && mainPart.promoPrice && mainPart.promoPrice > 0 && (
-                        <Button 
-                            type="button" 
-                            variant="outline" 
-                            size="icon" 
-                            onClick={() => setUsePromoPrice(!usePromoPrice)}
-                            className={cn("w-12 h-12", usePromoPrice && "bg-green-100 border-green-600 text-green-600 hover:bg-green-200")}
-                            disabled={isReadOnly}
-                        >
-                            <TicketPercent />
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <FormField control={form.control} name="customerName" render={({ field }) => (
+                            <FormItem>
+                                <FormLabel>Nombre</FormLabel>
+                                <FormControl><Input placeholder="John Doe" {...field} /></FormControl>
+                                <FormMessage />
+                            </FormItem>
+                        )}/>
+                        <FormField control={form.control} name="customerPhone" render={({ field }) => (
+                            <FormItem>
+                                <FormLabel>Teléfono</FormLabel>
+                                <FormControl><Input placeholder="0412-123-4567" {...field} /></FormControl>
+                                <FormMessage />
+                            </FormItem>
+                        )}/>
+                         <FormField control={form.control} name="customerID" render={({ field }) => (
+                            <FormItem>
+                                <FormLabel>Cédula de Identidad</FormLabel>
+                                <FormControl><Input placeholder="V-12345678" {...field} /></FormControl>
+                                <FormMessage />
+                            </FormItem>
+                        )}/>
+                        <FormField control={form.control} name="customerAddress" render={({ field }) => (
+                            <FormItem>
+                                <FormLabel>Dirección</FormLabel>
+                                <FormControl><Input placeholder="Av. Principal, Edificio..." {...field} /></FormControl>
+                                <FormMessage />
+                            </FormItem>
+                        )}/>
+                    </div>
+                </fieldset>
+
+                <fieldset className="grid grid-cols-2 gap-4" disabled={isReadOnly}>
+                <legend className="text-lg font-semibold mb-4 col-span-2">Información del Dispositivo</legend>
+                    <FormField control={form.control} name="deviceMake" render={({ field }) => (
+                        <FormItem><FormLabel>Marca</FormLabel><FormControl><Input placeholder="Apple" {...field} /></FormControl><FormMessage /></FormItem>
+                    )}/>
+                    <FormField control={form.control} name="deviceModel" render={({ field }) => (
+                        <FormItem><FormLabel>Modelo</FormLabel><FormControl><Input placeholder="iPhone 14 Pro" {...field} /></FormControl><FormMessage /></FormItem>
+                    )}/>
+                    <FormField control={form.control} name="deviceImei" render={({ field }) => (
+                        <FormItem className="col-span-2"><FormLabel>IMEI / Serie (Opcional)</FormLabel><FormControl><Input placeholder="123456789012345" {...field} /></FormControl><FormMessage /></FormItem>
+                    )}/>
+                    {warrantyInfo && (
+                        <Alert variant="destructive" className="col-span-2">
+                            <AlertCircle className="h-4 w-4" />
+                            <AlertTitle>¡Dispositivo en Garantía!</AlertTitle>
+                            <AlertDescription>
+                                {warrantyInfo.message}<br />
+                                <span className="font-semibold">{warrantyInfo.date}</span>
+                            </AlertDescription>
+                        </Alert>
+                    )}
+                </fieldset>
+                
+                <FormField control={form.control} name="reportedIssue" render={({ field }) => (
+                    <FormItem><FormLabel>Problema Reportado</FormLabel><FormControl><Textarea placeholder="Describe el problema..." {...field} disabled={isReadOnly} /></FormControl><FormMessage /></FormItem>
+                )}/>
+
+                <fieldset disabled={isReadOnly}>
+                    <legend className="text-lg font-semibold mb-4 col-span-2">Checklist de Inspección Inicial</legend>
+                    <FormField
+                        control={form.control}
+                        name="initialConditionsChecklist"
+                        render={() => (
+                            <FormItem className="grid grid-cols-2 gap-x-4 gap-y-2">
+                                {initialChecklistItems.map((item) => (
+                                    <FormField
+                                        key={item.id}
+                                        control={form.control}
+                                        name="initialConditionsChecklist"
+                                        render={({ field }) => {
+                                            return (
+                                            <FormItem key={item.id} className="flex flex-row items-start space-x-3 space-y-0">
+                                                <FormControl>
+                                                    <Checkbox
+                                                        checked={field.value?.includes(item.label)}
+                                                        onCheckedChange={(checked) => {
+                                                            return checked
+                                                            ? field.onChange([...(field.value || []), item.label])
+                                                            : field.onChange(
+                                                                field.value?.filter(
+                                                                    (value) => value !== item.label
+                                                                )
+                                                                )
+                                                        }}
+                                                    />
+                                                </FormControl>
+                                                <FormLabel className="font-normal">{item.label}</FormLabel>
+                                            </FormItem>
+                                            )
+                                        }}
+                                    />
+                                ))}
+                            </FormItem>
+                        )}
+                    />
+                </fieldset>
+                
+                <fieldset className="space-y-4" disabled={isReadOnly}>
+                    <legend className="text-lg font-semibold mb-4 col-span-2">Costos y Estado</legend>
+                    <div>
+                        <Label>Pieza Principal de la Reparación</Label>
+                        <Popover open={partsPopoverOpen} onOpenChange={setPartsPopoverOpen}>
+                            <PopoverTrigger asChild>
+                                <Button type="button" variant="outline" className="w-full justify-start text-left font-normal mt-1" disabled={isReadOnly}>
+                                    {mainPart ? mainPart.name : "Seleccionar pieza principal..."}
+                                </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
+                                <Command>
+                                    <CommandInput placeholder="Buscar pieza..." />
+                                    <CommandList>
+                                    <CommandEmpty>No se encontraron piezas.</CommandEmpty>
+                                    <CommandGroup>
+                                        {(products || []).map((product) => {
+                                            const availableStock = product.stockLevel - (product.reservedStock || 0);
+                                            return (
+                                                <CommandItem
+                                                    key={product.id}
+                                                    value={product.name}
+                                                    onSelect={() => {
+                                                        setMainPart(product);
+                                                        setUsePromoPrice(false); // Reset promo on new part selection
+                                                        setPartsPopoverOpen(false);
+                                                    }}
+                                                    disabled={availableStock <= 0}
+                                                    className="flex justify-between"
+                                                >
+                                                    <span>{product.name}</span>
+                                                    <span className="text-xs text-muted-foreground">Disp: {availableStock}</span>
+                                                </CommandItem>
+                                            )
+                                        })}
+                                    </CommandGroup>
+                                    </CommandList>
+                                </Command>
+                            </PopoverContent>
+                        </Popover>
+                    </div>
+
+                    <div className="col-span-2 flex items-end gap-2">
+                        <div className="flex-1">
+                            <Label>Costo Total Estimado ({getSymbol()})</Label>
+                            <Input value={formatCurrency(estimatedCost)} disabled className="font-bold text-lg h-12 mt-1" />
+                             <FormDescription>
+                                o ~Bs {formatCurrency(convert(estimatedCost, 'USD', 'Bs'), 'Bs')}
+                            </FormDescription>
+                        </div>
+                        {mainPart && mainPart.promoPrice && mainPart.promoPrice > 0 && (
+                            <Button 
+                                type="button" 
+                                variant="outline" 
+                                size="icon" 
+                                onClick={() => setUsePromoPrice(!usePromoPrice)}
+                                className={cn("w-12 h-12", usePromoPrice && "bg-green-100 border-green-600 text-green-600 hover:bg-green-200")}
+                                disabled={isReadOnly}
+                            >
+                                <TicketPercent />
+                            </Button>
+                        )}
+                    </div>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
+                         <FormField control={form.control} name="amountPaid" render={({ field }) => (
+                            <FormItem>
+                                <FormLabel>Monto Pagado ($)</FormLabel>
+                                <FormControl>
+                                    <Input 
+                                        type="number" 
+                                        step="0.01" 
+                                        {...field}
+                                        onChange={e => {
+                                            field.onChange(e);
+                                            setAmountPaidInBs(""); // Clear Bs field if USD is typed
+                                        }}
+                                    />
+                                </FormControl>
+                                <FormMessage />
+                            </FormItem>
+                        )}/>
+                        <FormItem>
+                            <FormLabel>o Monto Pagado (Bs)</FormLabel>
+                             <FormControl>
+                                <Input 
+                                    type="number" 
+                                    step="0.01"
+                                    value={amountPaidInBs}
+                                    onChange={(e) => handleBsToUsdConversion(e.target.value)}
+                                    placeholder="0.00"
+                                />
+                            </FormControl>
+                        </FormItem>
+                    </div>
+
+                    <div className="text-sm text-destructive font-semibold text-right p-2 bg-muted rounded-md flex items-center justify-end">
+                        <span>Saldo Pendiente: {getSymbol()}{Math.max(0, estimatedCost - amountPaid).toFixed(2)}</span>
+                    </div>
+                    <FormField control={form.control} name="status" render={({ field }) => (
+                        <FormItem><FormLabel>Estado</FormLabel>
+                            <Select onValueChange={field.onChange} value={field.value} disabled={repairJob?.status === 'Completado'}>
+                                <FormControl><SelectTrigger><SelectValue placeholder="Seleccionar estado" /></SelectTrigger></FormControl>
+                                <SelectContent>{repairStatuses.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
+                            </Select>
+                        <FormMessage /></FormItem>
+                    )}/>
+                </fieldset>
+                <FormField control={form.control} name="notes" render={({ field }) => (
+                    <FormItem><FormLabel>Notas Internas</FormLabel><FormControl><Textarea placeholder="Añade cualquier nota interna..." {...field} disabled={isReadOnly} /></FormControl><FormMessage /></FormItem>
+                )}/>
+                <DialogFooter>
+                    {repairJob && !isReadOnly && (
+                        <Button type="button" variant="outline" onClick={() => onPrint(repairJob)}>
+                            <Printer className="mr-2 h-4 w-4" />
+                            Imprimir Ticket
                         </Button>
                     )}
-                </div>
-
-                <FormField control={form.control} name="amountPaid" render={({ field }) => (
-                    <FormItem><FormLabel>Monto Pagado ({getSymbol()})</FormLabel><FormControl><Input type="number" step="0.01" {...field} /></FormControl><FormMessage /></FormItem>
-                )}/>
-                 <div className="text-sm text-destructive font-semibold text-right p-2 bg-muted rounded-md flex items-center justify-end">
-                    <span>Saldo Pendiente: {getSymbol()}{Math.max(0, estimatedCost - amountPaid).toFixed(2)}</span>
-                </div>
-                <FormField control={form.control} name="status" render={({ field }) => (
-                    <FormItem><FormLabel>Estado</FormLabel>
-                        <Select onValueChange={field.onChange} defaultValue={field.value} disabled={repairJob?.status === 'Completado'}>
-                            <FormControl><SelectTrigger><SelectValue placeholder="Seleccionar estado" /></SelectTrigger></FormControl>
-                            <SelectContent>{repairStatuses.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
-                        </Select>
-                    <FormMessage /></FormItem>
-                )}/>
-            </fieldset>
-             <FormField control={form.control} name="notes" render={({ field }) => (
-                <FormItem><FormLabel>Notas Internas</FormLabel><FormControl><Textarea placeholder="Añade cualquier nota interna..." {...field} disabled={isReadOnly} /></FormControl><FormMessage /></FormItem>
-            )}/>
-            <DialogFooter className="sticky bottom-0 bg-background pt-4 items-center">
-                {repairJob && !isReadOnly && (
-                    <Button type="button" variant="outline" onClick={() => onPrint(repairJob)}>
-                        <Printer className="mr-2 h-4 w-4" />
-                        Imprimir Ticket
-                    </Button>
-                )}
-              <Button type="submit">{isReadOnly ? 'Cerrar' : (repairJob ? 'Guardar Cambios' : 'Registrar y Imprimir Ticket')}</Button>
-            </DialogFooter>
-          </form>
+                    <Button type="submit">{isReadOnly ? 'Cerrar' : (repairJob ? 'Guardar Cambios' : 'Registrar y Imprimir Ticket')}</Button>
+                </DialogFooter>
+            </form>
         </Form>
       </DialogContent>
     </Dialog>
   );
 }
+
+
+    

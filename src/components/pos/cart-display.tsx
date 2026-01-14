@@ -2,11 +2,11 @@
 
 "use client";
 
-import type { CartItem, Payment, Product, Sale } from "@/lib/types";
+import type { CartItem, Payment, Product, Sale, RepairJob } from "@/lib/types";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Trash2, TicketPercent, Gift } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { CheckoutDialog } from "./checkout-dialog";
 import { useCurrency } from "@/hooks/use-currency";
 import { useRouter } from "next/navigation";
@@ -40,12 +40,37 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
   const { firestore } = useFirebase();
   const { toast } = useToast();
   const router = useRouter();
-  const { format: formatCurrency, convert, getDynamicPrice } = useCurrency();
+  const { format: formatCurrency, convert, getDynamicPrice, getSymbol } = useCurrency();
   const [discount, setDiscount] = useState(0);
+  const [activeRepairJob, setActiveRepairJob] = useState<RepairJob | null>(null);
+
+   useEffect(() => {
+    if (repairJobId) {
+      const repairJobStr = new URLSearchParams(window.location.search).get('repairJob');
+      if (repairJobStr) {
+        try {
+          const job: RepairJob = JSON.parse(decodeURIComponent(repairJobStr));
+          setActiveRepairJob(job);
+        } catch (e) {
+          console.error("Failed to parse repair job from URL for CartDisplay", e);
+          setActiveRepairJob(null);
+        }
+      }
+    } else {
+        setActiveRepairJob(null);
+    }
+  }, [repairJobId]);
+
 
   const getPrice = (item: CartItem) => {
     if (item.isGift) return 0;
-    if (item.isRepair) return 0; // Special case for repairs, their price is fixed. Let's find it.
+    
+    if (item.isRepair) {
+       if (activeRepairJob) {
+            return Math.max(0, activeRepairJob.estimatedCost - (activeRepairJob.amountPaid || 0));
+       }
+       return 0;
+    }
     
     const product = allProducts.find(p => p.id === item.productId);
     if (!product) return 0;
@@ -53,37 +78,11 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
     if (item.isPromo && product.promoPrice && product.promoPrice > 0) {
         return product.promoPrice;
     }
-
-    // This logic seems incorrect, retailPrice is dynamic
-    // if (product.retailPrice && product.retailPrice > 0) {
-    //     return product.retailPrice;
-    // }
     
     return getDynamicPrice(product.costPrice);
   };
   
-  // For repairs, price is pre-determined and stored in the first cart item.
-  const repairPrice = cart.find(item => item.isRepair)?.name.includes('Reparación')
-    ? (allProducts.find(p => p.id === cart.find(item => item.isRepair)!.productId) ? 0 : parseFloat(cart.find(item => item.isRepair)!.name.split('$')[1] || '0'))
-    : 0;
-
-  if(cart.find(item => item.isRepair)) {
-     const repairItem = cart.find(item => item.isRepair);
-     const job = allProducts.find(p => p.id === repairItem?.productId);
-     if(job) {
-        // This is a placeholder, need to figure out how to get the price of a repair job
-     }
-  }
-
-
   const subtotal = cart.reduce((acc, item) => {
-      if (item.isRepair) {
-           const repairJobStr = new URLSearchParams(window.location.search).get('repairJob');
-           if (!repairJobStr) return acc;
-           const repairJob = JSON.parse(decodeURIComponent(repairJobStr));
-           const remainingBalance = repairJob.estimatedCost - (repairJob.amountPaid || 0);
-          return acc + remainingBalance * item.quantity;
-      }
       return acc + getPrice(item) * item.quantity;
   }, 0);
 
@@ -97,7 +96,11 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
 
       const cartWithFinalPrices = cart.map(item => ({
         ...item,
-        price: getPrice(item)
+        price: getPrice(item),
+        // If it's a repair, we enrich the name for the final receipt
+        name: item.isRepair && activeRepairJob 
+            ? `Reparación: ${activeRepairJob.deviceMake} ${activeRepairJob.deviceModel} (Costo Total: ${getSymbol()}${formatCurrency(activeRepairJob.estimatedCost)}, Pagado: ${getSymbol()}${formatCurrency(activeRepairJob.amountPaid || 0)})`
+            : item.name
       }));
 
       for (const item of cartWithFinalPrices) {
@@ -144,7 +147,6 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
             }
             
             const currentAmountPaid = repairJobData.amountPaid || 0;
-            // The total for this transaction is `total`, which already includes discounts.
             const newTotalPaid = currentAmountPaid + total;
 
             const isNowPaidInFull = newTotalPaid >= repairJobData.estimatedCost;
@@ -152,7 +154,7 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
             batch.set(repairJobRef, { 
                 status: 'Completado', 
                 amountPaid: newTotalPaid,
-                isPaid: isNowPaidInFull, // Explicitly set isPaid based on the new total
+                isPaid: isNowPaidInFull,
             }, { merge: true });
         }
       }
@@ -211,31 +213,31 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
                 ) : (
                     cart.map((item) => {
                         const product = allProducts.find(p => p.id === item.productId);
-                        let itemPrice = 0;
-                        if (item.isRepair) {
-                            const repairJobStr = new URLSearchParams(window.location.search).get('repairJob');
-                            if (repairJobStr) {
-                                const repairJob = JSON.parse(decodeURIComponent(repairJobStr));
-                                const remainingBalance = repairJob.estimatedCost - (repairJob.amountPaid || 0);
-                                itemPrice = remainingBalance;
-                            }
-                        } else {
-                            itemPrice = getPrice(item);
-                        }
-
+                        const itemPrice = getPrice(item);
                         const totalItemPrice = itemPrice * item.quantity;
                         const totalItemPriceBs = convert(totalItemPrice, 'USD', 'Bs');
                         
+                        let displayName = item.name;
+                        let displayDescription = null;
+
+                        if (item.isRepair && activeRepairJob) {
+                            displayName = `Reparación: ${activeRepairJob.deviceMake} ${activeRepairJob.deviceModel}`;
+                            displayDescription = `(Costo Total: ${getSymbol()}${formatCurrency(activeRepairJob.estimatedCost)}, Pagado: ${getSymbol()}${formatCurrency(activeRepairJob.amountPaid || 0)})`;
+                        }
+
                         return (
                         <TableRow key={item.productId} className={cn(item.isGift && "bg-green-50")}>
                             <TableCell className="font-medium">
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-start gap-2">
                                      {product?.isGiftable && !item.isRepair && (
-                                        <Button variant="ghost" size="icon" className="w-6 h-6" onClick={() => onToggleGift(item.productId)}>
+                                        <Button variant="ghost" size="icon" className="w-6 h-6 mt-1" onClick={() => onToggleGift(item.productId)}>
                                             <Gift className={cn("w-4 h-4", item.isGift ? "text-green-600" : "text-muted-foreground")} />
                                         </Button>
                                     )}
-                                    <span>{item.name}</span>
+                                    <div>
+                                        <span>{displayName}</span>
+                                        {displayDescription && <div className="text-xs text-muted-foreground">{displayDescription}</div>}
+                                    </div>
                                 </div>
                             </TableCell>
                             <TableCell className="text-center">

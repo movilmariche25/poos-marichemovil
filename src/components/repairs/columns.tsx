@@ -13,9 +13,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { ArrowUpDown, MoreHorizontal, Edit, Trash2, DollarSign, Printer, Eye } from "lucide-react"
+import { MoreHorizontal, Edit, Trash2, DollarSign, Printer, Eye, ArrowUpDown } from "lucide-react"
 import { Badge } from "../ui/badge"
-import { RepairFormDialog } from "./repair-form-dialog"
 import { useToast } from "@/hooks/use-toast"
 import {
   AlertDialog,
@@ -34,11 +33,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { useFirebase, updateDocumentNonBlocking, deleteDocumentNonBlocking } from "@/firebase"
 import { doc, writeBatch, getDoc } from "firebase/firestore"
 import { handlePrintTicket } from "./repair-ticket"
-import { PayRepairButton } from "./pay-repair-button"
 import { AdminAuthDialog } from "../admin-auth-dialog"
 import { useState } from "react"
 import { cn } from "@/lib/utils"
 import { useRouter } from "next/navigation"
+import { RepairFormDialog } from "./repair-form-dialog"
 
 const statusColors: Record<RepairStatus, "default" | "secondary" | "destructive" | "outline"> = {
     'Pendiente': 'destructive',
@@ -115,11 +114,6 @@ const ActionsCell = ({ repairJob }: { repairJob: RepairJob }) => {
         });
     }
 
-    const handleEditClick = () => {
-        const editTrigger = document.getElementById(`edit-trigger-${repairJob.id}`);
-        editTrigger?.click();
-    };
-
     return (
         <>
             <DropdownMenu>
@@ -144,12 +138,13 @@ const ActionsCell = ({ repairJob }: { repairJob: RepairJob }) => {
                         Imprimir Ticket
                     </DropdownMenuItem>
                     
-                     <AdminAuthDialog onAuthorized={handleEditClick}>
+                    <RepairFormDialog repairJob={repairJob}>
                         <DropdownMenuItem onSelect={(e) => e.preventDefault()}>
                              {isCompletedAndPaid ? <Eye className="mr-2 h-4 w-4" /> : <Edit className="mr-2 h-4 w-4" />}
-                             {isCompletedAndPaid ? 'Ver Detalles' : 'Editar / Ver Detalles'}
+                            {isCompletedAndPaid ? 'Ver Detalles' : 'Editar / Ver Detalles'}
                         </DropdownMenuItem>
-                    </AdminAuthDialog>
+                    </RepairFormDialog>
+
 
                     <DropdownMenuSeparator />
                     <AdminAuthDialog onAuthorized={() => setIsDeleteDialogOpen(true)}>
@@ -160,10 +155,6 @@ const ActionsCell = ({ repairJob }: { repairJob: RepairJob }) => {
                     </AdminAuthDialog>
                 </DropdownMenuContent>
             </DropdownMenu>
-             {/* Hidden trigger for authorized edit */}
-             <RepairFormDialog repairJob={repairJob}>
-                <button id={`edit-trigger-${repairJob.id}`} style={{ display: 'none' }}></button>
-            </RepairFormDialog>
 
             {/* Alert for deleting */}
              <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
@@ -278,15 +269,10 @@ export const columns: ColumnDef<RepairJob>[] = [
   },
   {
     accessorKey: "createdAt",
-    header: ({ column }) => (
-      <Button variant="ghost" onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}>
-        Fecha de Registro
-        <ArrowUpDown className="ml-2 h-4 w-4" />
-      </Button>
-    ),
+    header: "Fecha de Registro",
     cell: ({ row }) => {
         if (!row.getValue("createdAt")) return null;
-        const date = parseISO(row.getValue("createdAt"));
+        const date = parseISO(row.getValue("createdAt") as string);
         return <div>{format(date, 'MMM d, yyyy', { locale: es })}</div>
     }
   },
