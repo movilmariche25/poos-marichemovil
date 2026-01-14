@@ -13,10 +13,11 @@ import { useRouter } from "next/navigation";
 import { useCollection, useFirebase, useMemoFirebase, deleteDocumentNonBlocking, setDocumentNonBlocking, addDocumentNonBlocking } from "@/firebase";
 import { collection, doc } from "firebase/firestore";
 import { Button } from "@/components/ui/button";
-import { ParkingSquare } from "lucide-react";
+import { ParkingSquare, Calculator } from "lucide-react";
 import { HoldSaleDialog } from "@/components/pos/hold-sale-dialog";
 import { HeldSalesSheet } from "@/components/pos/held-sales-sheet";
 import { useCurrency } from "@/hooks/use-currency";
+import { PriceCalculatorDialog } from "@/components/tools/price-calculator-dialog";
 
 function POSContent() {
     const { firestore, isUserLoading } = useFirebase();
@@ -306,6 +307,11 @@ function POSContent() {
                     <h1 className="text-lg font-semibold md:text-xl">Punto de Venta</h1>
                 </div>
                 <div className="ml-auto flex items-center gap-2">
+                    <PriceCalculatorDialog>
+                        <Button variant="outline" size="icon">
+                            <Calculator className="h-4 w-4" />
+                        </Button>
+                    </PriceCalculatorDialog>
                     <HeldSalesSheet heldSales={heldSales || []} />
                     <HoldSaleDialog onHoldSale={handleHoldSale} disabled={cart.length === 0 || cart.some(c => c.isRepair)}>
                         <Button variant="outline">

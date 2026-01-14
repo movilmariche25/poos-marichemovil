@@ -4,7 +4,7 @@
 import React, { Suspense, useState, useMemo } from 'react';
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/page-header";
-import { PlusCircle, Trash2 } from "lucide-react";
+import { PlusCircle, Trash2, Calculator } from "lucide-react";
 import { DataTable } from "@/components/data-table";
 import { columns } from "@/components/inventory/columns";
 import { ProductFormDialog } from "@/components/inventory/product-form-dialog";
@@ -28,6 +28,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { AdminAuthDialog } from '@/components/admin-auth-dialog';
 import { PrintLabelsButton } from '@/components/inventory/print-labels-button';
+import { PriceCalculatorDialog } from '@/components/tools/price-calculator-dialog';
 
 function BulkDeleteButton({ table }: { table: TanstackTable<Product> }) {
     const { firestore } = useFirebase();
@@ -146,6 +147,11 @@ function InventoryContent() {
     return (
         <>
             <PageHeader title="Inventario">
+                 <PriceCalculatorDialog>
+                    <Button variant="outline" size="icon">
+                        <Calculator className="h-4 w-4" />
+                    </Button>
+                </PriceCalculatorDialog>
                 <ProductFormDialog productCount={products?.length || 0}>
                     <Button>
                         <PlusCircle className="mr-2 h-4 w-4" />
