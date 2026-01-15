@@ -17,8 +17,8 @@ import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "../ui/skeleton";
 import { AdminAuthDialog } from "../admin-auth-dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "../ui/alert-dialog";
-import { useFirebase, useCollection, useMemoFirebase } from "@/firebase";
-import { doc, writeBatch, collection, runTransaction } from "firebase/firestore";
+import { useFirebase } from "@/firebase";
+import { doc, runTransaction } from "firebase/firestore";
 import { Badge } from "../ui/badge";
 import { cn } from "@/lib/utils";
 import { Textarea } from "../ui/textarea";
@@ -56,18 +56,13 @@ const RefundButton = ({ sale }: { sale: Sale }) => {
                         const productDoc = await transaction.get(productRef);
                         if (productDoc.exists()) {
                             const product = productDoc.data() as Product;
+                            const currentDamagedStock = product.damagedStock || 0;
                             if (stockAction === 'return') {
-                                 // When returning, we just decrease the reservedStock that was increased during sale
-                                 const newReservedStock = (product.reservedStock || 0) - item.quantity;
-                                 transaction.update(productRef, { reservedStock: Math.max(0, newReservedStock) });
-                            } else { // 'damage'
-                                // When damaging, we decrease reserved and increase damaged
-                                const newReservedStock = (product.reservedStock || 0) - item.quantity;
-                                const newDamagedStock = (product.damagedStock || 0) + item.quantity;
-                                transaction.update(productRef, { 
-                                    reservedStock: Math.max(0, newReservedStock),
-                                    damagedStock: newDamagedStock 
-                                });
+                                 // To "return" stock, we decrease the damaged/consumed amount
+                                 const newDamagedStock = currentDamagedStock - item.quantity;
+                                 transaction.update(productRef, { damagedStock: Math.max(0, newDamagedStock) });
+                            } else { // 'damage' - stock was already considered damaged/consumed, so no change needed
+                                 // No change to stock counters, as the refund doesn't make the part usable again.
                             }
                         }
                     }
@@ -108,6 +103,11 @@ const RefundButton = ({ sale }: { sale: Sale }) => {
         return <Badge variant="secondary">Reembolsado</Badge>;
     }
     
+    // Do not allow refund if the sale is part of a closed reconciliation
+    if (sale.reconciliationId) {
+        return <Badge variant="outline">Cerrada</Badge>
+    }
+    
     return (
         <>
             <AdminAuthDialog onAuthorized={onAuthorized}>
@@ -146,11 +146,11 @@ const RefundButton = ({ sale }: { sale: Sale }) => {
                             >
                                 <div className="flex items-center space-x-2">
                                     <RadioGroupItem value="return" id="r1" />
-                                    <Label htmlFor="r1">Devolver al Stock Disponible</Label>
+                                    <Label htmlFor="r1">Devolver a Stock Disponible (aumenta Stock Total)</Label>
                                 </div>
                                 <div className="flex items-center space-x-2">
                                     <RadioGroupItem value="damage" id="r2" />
-                                    <Label htmlFor="r2">Mover a Stock Dañado/Consumido</Label>
+                                    <Label htmlFor="r2">Mover a Stock Dañado (no afecta Stock Total)</Label>
                                 </div>
                             </RadioGroup>
                         </div>
@@ -171,20 +171,10 @@ const RefundButton = ({ sale }: { sale: Sale }) => {
 const SaleReceiptDialog = ({ sale }: { sale: Sale }) => {
     const [open, setOpen] = useState(false);
     const { toast } = useToast();
-    const { format: formatCurrency, getSymbol } = useCurrency();
-
-    const getPaymentAmountInCorrectCurrency = useCallback((payment: Payment) => {
-        const symbol = payment.method === 'Efectivo USD' ? '$' : 'Bs';
-        return `${symbol}${formatCurrency(payment.amount)}`;
-    }, [formatCurrency]);
+    const currency = useCurrency();
 
     const onPrint = () => {
-        const receiptProps = {
-            sale,
-            currencySymbol: getSymbol(),
-            formatCurrency: formatCurrency,
-            getPaymentAmountInCorrectCurrency: getPaymentAmountInCorrectCurrency
-        };
+        const receiptProps = { sale, currency };
         handlePrintReceipt(receiptProps, (error) => {
             toast({
                 variant: "destructive",
@@ -207,9 +197,7 @@ const SaleReceiptDialog = ({ sale }: { sale: Sale }) => {
                     <div className="overflow-y-auto p-4">
                         <ReceiptView 
                             sale={sale} 
-                            currencySymbol={getSymbol()}
-                            formatCurrency={formatCurrency}
-                            getPaymentAmountInCorrectCurrency={getPaymentAmountInCorrectCurrency}
+                            currency={currency}
                         />
                     </div>
                     <div className="p-4 flex gap-2 border-t">
@@ -245,10 +233,10 @@ export function TransactionList({ sales, isLoading }: TransactionListProps) {
     }
 
     const getPaymentAmountInCorrectCurrency = (payment: Payment) => {
-        let symbol = payment.method === 'Efectivo USD' ? '$' : 'Bs';
+        let symbol = payment.method === 'Efectivo USD' ? getSymbol('USD') : getSymbol('Bs');
         let amount = payment.amount;
 
-        return `${symbol}${formatCurrency(amount)}`;
+        return `${symbol}${formatCurrency(amount, payment.method === 'Efectivo USD' ? 'USD' : 'Bs')}`;
     }
 
     // Sort sales by date, most recent first
@@ -310,17 +298,24 @@ export function TransactionList({ sales, isLoading }: TransactionListProps) {
                              {sale.discount > 0 && <p className="text-destructive">Descuento: -{getSymbol()}{formatCurrency(sale.discount)}</p>}
                              <p className="font-bold text-base">Total: {getSymbol()}{formatCurrency(sale.totalAmount)}</p>
                         </div>
-                         {sale.payments && sale.payments.length > 0 && (
-                            <div className="mt-2 space-y-1 text-xs text-right text-muted-foreground">
-                                <p className="font-semibold">Pagos:</p>
-                                {sale.payments.map((p, i) => <p key={i}>{p.method}{p.reference ? ` (${p.reference})` : ''}: {getPaymentAmountInCorrectCurrency(p)}</p>)}
-                            </div>
-                        )}
+                         <div className="mt-2 space-y-1 text-xs text-right text-muted-foreground">
+                            <p className="font-semibold">Pagos:</p>
+                            {sale.payments.map((p, i) => <p key={i}>{p.method}{p.reference ? ` (${p.reference})` : ''}: {getPaymentAmountInCorrectCurrency(p)}</p>)}
+                            {sale.changeGiven && sale.changeGiven.length > 0 && (
+                                <div className="font-semibold text-primary">
+                                    <p>Vuelto Entregado:</p>
+                                    {sale.changeGiven.map((change, i) => {
+                                        const isUSD = change.method === 'Efectivo USD';
+                                        const symbol = getSymbol(isUSD ? 'USD' : 'Bs');
+                                        const formattedAmount = formatCurrency(change.amount, isUSD ? 'USD' : 'Bs');
+                                        return <p key={i} className="pl-2">{change.method}: {symbol}{formattedAmount}</p>
+                                    })}
+                                </div>
+                            )}
+                        </div>
                     </AccordionContent>
                 </AccordionItem>
             ))}
         </Accordion>
     )
 }
-
-    

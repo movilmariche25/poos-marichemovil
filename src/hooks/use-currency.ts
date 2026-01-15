@@ -1,4 +1,5 @@
 
+
 "use client";
 
 import { useDoc, useFirebase, useMemoFirebase } from "@/firebase";
@@ -24,8 +25,7 @@ export const useCurrency = () => {
         
         let displayValue = value;
         
-        // Using 'de-DE' locale to enforce dot for thousands and comma for decimals,
-        // which is the standard format used in Venezuela. 'es-VE' is inconsistent across browsers.
+        // Using 'de-DE' locale to enforce comma for decimals and dot for thousands
         const formatter = new Intl.NumberFormat('de-DE', {
             style: 'decimal',
             minimumFractionDigits: 2,
@@ -37,7 +37,7 @@ export const useCurrency = () => {
 
     const getSymbol = (targetCurrency?: Currency) => {
         const c = targetCurrency || currency;
-        return c === 'Bs' ? 'Bs' : '$';
+        return c === 'Bs' ? 'Bs ' : '$';
     }
 
     const convert = (value: number, from: Currency, to: Currency) => {

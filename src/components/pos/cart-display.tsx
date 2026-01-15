@@ -12,8 +12,8 @@ import { useCurrency } from "@/hooks/use-currency";
 import { useRouter } from "next/navigation";
 import { ScrollArea } from "../ui/scroll-area";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
-import { useFirebase, setDocumentNonBlocking } from "@/firebase";
-import { collection, doc, getDoc, writeBatch } from "firebase/firestore";
+import { useFirebase } from "@/firebase";
+import { collection, doc, getDoc, writeBatch, runTransaction } from "firebase/firestore";
 import { useToast } from "@/hooks/use-toast";
 import { format } from 'date-fns';
 import { cn } from "@/lib/utils";
@@ -89,7 +89,7 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
   const total = subtotal - discount;
 
 
-  const handleCheckout = async (payments: Payment[]): Promise<Sale | null> => {
+  const handleCheckout = async (payments: Payment[], changeGiven: Payment[], totalChangeInUSD: number): Promise<Sale | null> => {
       if (!firestore) return null;
 
       const batch = writeBatch(firestore);
@@ -102,29 +102,69 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
             : item.name
       }));
 
-      for (const item of cartWithFinalPrices) {
-          if (item.isRepair) continue;
+      // In a transaction, update all product stocks
+      try {
+        await runTransaction(firestore, async (transaction) => {
+          for (const item of cartWithFinalPrices) {
+            if (item.isRepair) {
+                const repairJobDoc = await transaction.get(doc(firestore, 'repair_jobs', repairJobId!));
+                const repairJobData = repairJobDoc.data() as RepairJob;
+                
+                // When a repair is paid, the reserved parts are "consumed".
+                // We decrease reserved stock and increase damaged/consumed stock.
+                if (repairJobData.reservedParts && repairJobData.reservedParts.length > 0) {
+                    for (const part of repairJobData.reservedParts) {
+                        const productRef = doc(firestore, 'products', part.productId);
+                        const productDoc = await transaction.get(productRef);
+                        if (productDoc.exists()) {
+                            const productData = productDoc.data() as Product;
+                            const newReservedStock = (productData.reservedStock || 0) - part.quantity;
+                            const newDamagedStock = (productData.damagedStock || 0) + part.quantity;
+                            transaction.update(productRef, { 
+                                reservedStock: newReservedStock < 0 ? 0 : newReservedStock,
+                                damagedStock: newDamagedStock,
+                            });
+                        }
+                    }
+                }
+                continue;
+            }
 
-          const product = allProducts.find(p => p.id === item.productId);
-          if (!product) continue;
-          
-          if (product.isCombo && product.comboItems) {
+            // For direct sales, we mark the item as 'damaged' to remove it from available stock
+            // without touching the 'stockLevel' which is user-controlled.
+            const productRef = doc(firestore, 'products', item.productId);
+            const productDoc = await transaction.get(productRef);
+            if (!productDoc.exists()) {
+              throw new Error(`Producto ${item.name} no encontrado.`);
+            }
+
+            const product = productDoc.data() as Product;
+            
+            if (product.isCombo && product.comboItems) {
               for (const comboItem of product.comboItems) {
-                  const componentProductRef = doc(firestore, 'products', comboItem.productId);
-                  const componentProductDoc = await getDoc(componentProductRef);
-                  if (componentProductDoc.exists()) {
-                      const componentProductData = componentProductDoc.data() as Product;
-                      // Don't touch stockLevel. Increase reservedStock to mark as "sold".
-                      const newReservedStock = (componentProductData.reservedStock || 0) + (comboItem.quantity * item.quantity);
-                      batch.update(componentProductRef, { reservedStock: newReservedStock });
-                  }
+                const componentRef = doc(firestore, 'products', comboItem.productId);
+                const componentDoc = await transaction.get(componentRef);
+                if (!componentDoc.exists()) {
+                   throw new Error(`Componente ${comboItem.productName} del combo no encontrado.`);
+                }
+                const componentData = componentDoc.data() as Product;
+                const newDamagedStock = (componentData.damagedStock || 0) + (comboItem.quantity * item.quantity);
+                transaction.update(componentRef, { damagedStock: newDamagedStock });
               }
-          } else {
-              const productRef = doc(firestore, 'products', item.productId);
-              // Don't touch stockLevel. Increase reservedStock to mark as "sold".
-              const newReservedStock = (product.reservedStock || 0) + item.quantity;
-              batch.update(productRef, { reservedStock: newReservedStock });
+            } else {
+              const newDamagedStock = (product.damagedStock || 0) + item.quantity;
+              transaction.update(productRef, { damagedStock: newDamagedStock });
+            }
           }
+        });
+      } catch (error: any) {
+        console.error("Error updating stock during sale:", error);
+        toast({
+          variant: "destructive",
+          title: "Error de Stock",
+          description: error.message || "No se pudo actualizar el stock para uno o más productos. La venta ha sido cancelada.",
+        });
+        return null;
       }
       
       if (repairJobId) {
@@ -133,27 +173,8 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
         const repairJobData = repairJobDoc.data() as RepairJob;
         
         if (repairJobData) {
-            // When paying for a repair, the parts are "consumed".
-            // We decrease the reserved stock (as it's no longer reserved)
-            // but DO NOT touch the total stockLevel. The part is just "gone".
-            if (repairJobData.reservedParts && repairJobData.reservedParts.length > 0) {
-                for (const part of repairJobData.reservedParts) {
-                    const productRef = doc(firestore, 'products', part.productId);
-                    const productDoc = await getDoc(productRef);
-                    if (productDoc.exists()) {
-                        const productData = productDoc.data() as Product;
-                        const newReservedStock = (productData.reservedStock || 0) - part.quantity;
-                        
-                        batch.update(productRef, { 
-                            reservedStock: newReservedStock < 0 ? 0 : newReservedStock 
-                        });
-                    }
-                }
-            }
-            
             const currentAmountPaid = repairJobData.amountPaid || 0;
             const newTotalPaid = currentAmountPaid + total;
-
             const isNowPaidInFull = newTotalPaid >= repairJobData.estimatedCost;
 
             batch.set(repairJobRef, { 
@@ -174,6 +195,10 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
           transactionDate: new Date().toISOString(),
           payments: payments,
           ...(repairJobId && { repairJobId }),
+          ...(changeGiven && changeGiven.length > 0 && { 
+            changeGiven,
+            totalChangeInUSD
+          }),
       };
       
       const saleRef = doc(firestore, 'sale_transactions', saleId);
@@ -193,7 +218,7 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
         <div className="p-4 border-b bg-white flex-shrink-0">
             <h2 className="text-lg font-semibold">Ticket de Venta</h2>
         </div>
-      <ScrollArea className="flex-1 bg-white">
+      <ScrollArea className="flex-1 bg-white min-h-0">
         <Table>
             <TableHeader>
                 <TableRow>
@@ -257,11 +282,11 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
                                             <TicketPercent className={cn("w-4 h-4", item.isPromo ? "text-green-600" : "text-muted-foreground")} />
                                         </Button>
                                     )}
-                                    <span>${formatCurrency(itemPrice)}</span>
+                                    <span>{getSymbol('USD')}{formatCurrency(itemPrice, 'USD')}</span>
                                </div>
                             </TableCell>
                             <TableCell className="text-right">
-                                <div className="font-medium">${formatCurrency(totalItemPrice)}</div>
+                                <div className="font-medium">{getSymbol('USD')}{formatCurrency(totalItemPrice, 'USD')}</div>
                                 <div className="text-xs text-muted-foreground">Bs {formatCurrency(totalItemPriceBs, 'Bs')}</div>
                             </TableCell>
                             <TableCell>
@@ -280,7 +305,7 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
         <div className="flex justify-between text-sm">
             <span>Sub-Total</span>
             <div className="text-right">
-                <span className="font-medium">${formatCurrency(subtotal)}</span>
+                <span className="font-medium">{getSymbol('USD')}{formatCurrency(subtotal, 'USD')}</span>
                 <span className="text-xs text-muted-foreground block">Bs {formatCurrency(convert(subtotal, 'USD', 'Bs'), 'Bs')}</span>
             </div>
         </div>
@@ -303,7 +328,7 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
             isRepairSale={!!repairJobId}
         >
             <Button size="lg" disabled={cart.length === 0} className="w-full h-16 text-xl flex flex-col items-center">
-                <span className="text-2xl font-bold">PAGAR: ${formatCurrency(total)}</span>
+                <span className="text-2xl font-bold">PAGAR: {getSymbol('USD')}{formatCurrency(total, 'USD')}</span>
                 <span className="text-sm font-normal text-primary-foreground/80">
                     o Bs {formatCurrency(convert(total, 'USD', 'Bs'), 'Bs')}
                 </span>
@@ -313,5 +338,3 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
     </div>
   );
 }
-
-    

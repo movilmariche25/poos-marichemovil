@@ -124,12 +124,12 @@ function POSContent() {
              const stockCounts = product.comboItems.map(item => {
                  const component = products.find(p => p.id === item.productId);
                  if (!component) return 0;
-                 const available = component.stockLevel - (component.reservedStock || 0);
+                 const available = component.stockLevel - (component.reservedStock || 0) - (component.damagedStock || 0);
                  return Math.floor(available / item.quantity);
              });
              return Math.min(...stockCounts);
         }
-        return product.stockLevel - (product.reservedStock || 0);
+        return product.stockLevel - (product.reservedStock || 0) - (product.damagedStock || 0);
     };
 
 
@@ -316,8 +316,8 @@ function POSContent() {
                     </HoldSaleDialog>
                 </div>
             </header>
-            <main className="flex-1 grid grid-cols-10 gap-0 overflow-hidden">
-                <div className="col-span-4 bg-white border-r h-full">
+            <main className="flex-1 grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-0 overflow-hidden">
+                <div className="col-span-1 md:col-span-1 lg:col-span-2 bg-white border-r h-full">
                     <CartDisplay 
                         cart={cart}
                         allProducts={products || []}
@@ -329,7 +329,7 @@ function POSContent() {
                         repairJobId={activeRepairJob?.id}
                     />
                 </div>
-                <div className="col-span-6 flex flex-col p-4 h-full">
+                <div className="col-span-1 md:col-span-2 lg:col-span-3 flex flex-col p-4 h-full">
                      <ProductGrid products={products || []} onProductSelect={handleProductSelect} isLoading={productsLoading} />
                 </div>
             </main>

@@ -97,6 +97,8 @@ export type Sale = {
   refundedAt?: string;
   refundReason?: string;
   reconciliationId?: string; // ID linking to the daily reconciliation
+  totalChangeInUSD?: number;
+  changeGiven?: Payment[];
 };
 
 export type ReconciliationPaymentMethodSummary = {

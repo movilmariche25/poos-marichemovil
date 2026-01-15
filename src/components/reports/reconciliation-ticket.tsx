@@ -96,8 +96,8 @@ export const handlePrintReconciliation = (props: ReconciliationTicketProps, onEr
                         .space-y-2 > :not([hidden]) ~ :not([hidden]) { margin-top: 0.5rem; }
                         .justify-between { justify-content: space-between; }
                         .font-semibold { font-weight: 600; }
-                        .text-destructive { color: hsl(0, 84.2%, 60.2%); }
-                        .text-green-600 { color: #16a34a; }
+                        .text-destructive { color: #000; }
+                        .text-green-600 { color: #000; }
                     </style>
                 </head>
                 <body>
@@ -113,5 +113,3 @@ export const handlePrintReconciliation = (props: ReconciliationTicketProps, onEr
         onError("No se pudo abrir la ventana de impresión. Revisa si tu navegador está bloqueando las ventanas emergentes.");
     }
 }
-
-    

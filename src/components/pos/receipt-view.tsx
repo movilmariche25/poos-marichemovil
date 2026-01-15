@@ -7,15 +7,22 @@ import { format, parseISO } from "date-fns";
 import { es } from "date-fns/locale";
 import { Separator } from "../ui/separator";
 import { renderToString } from 'react-dom/server';
+import { useCurrency } from "@/hooks/use-currency";
 
 type ReceiptViewProps = {
     sale: Sale;
-    currencySymbol: string;
-    formatCurrency: (value: number) => string;
-    getPaymentAmountInCorrectCurrency: (payment: Payment) => string;
+    currency: Pick<ReturnType<typeof useCurrency>, 'format' | 'getSymbol' | 'convert'>;
 }
 
-export function ReceiptView({ sale, currencySymbol, formatCurrency, getPaymentAmountInCorrectCurrency }: ReceiptViewProps) {
+export function ReceiptView({ sale, currency }: ReceiptViewProps) {
+    const { format: formatCurrency, getSymbol } = currency;
+
+    const getPaymentAmountInCorrectCurrency = (payment: Payment) => {
+        const isUSD = payment.method === 'Efectivo USD';
+        const symbol = isUSD ? getSymbol('USD') : getSymbol('Bs');
+        return `${symbol}${formatCurrency(payment.amount, isUSD ? 'USD' : 'Bs')}`;
+    };
+
     return (
          <div className="text-black bg-white p-2 font-mono text-xs max-w-[215px] mx-auto">
             <div className="text-center mb-2">
@@ -35,8 +42,8 @@ export function ReceiptView({ sale, currencySymbol, formatCurrency, getPaymentAm
                     <div key={item.productId}>
                         <div className="break-words">{item.name}</div>
                         <div className="flex justify-between">
-                            <span>{item.quantity} x {currencySymbol}{formatCurrency(item.price)}</span>
-                            <span>{currencySymbol}{formatCurrency(item.price * item.quantity)}</span>
+                            <span>{item.quantity} x {getSymbol('USD')}{formatCurrency(item.price, 'USD')}</span>
+                            <span>{getSymbol('USD')}{formatCurrency(item.price * item.quantity, 'USD')}</span>
                         </div>
                     </div>
                 ))}
@@ -45,33 +52,50 @@ export function ReceiptView({ sale, currencySymbol, formatCurrency, getPaymentAm
             <div className="space-y-1 text-right">
                  <div className="flex justify-between">
                     <p>Sub-total:</p>
-                    <p>{currencySymbol}{formatCurrency(sale.subtotal)}</p>
+                    <p>{getSymbol('USD')}{formatCurrency(sale.subtotal, 'USD')}</p>
                 </div>
                  {sale.discount > 0 && (
                     <div className="flex justify-between">
                         <p>Descuento:</p>
-                        <p className="text-destructive">-{currencySymbol}{formatCurrency(sale.discount)}</p>
+                        <p className="text-destructive">-{getSymbol('USD')}{formatCurrency(sale.discount, 'USD')}</p>
                     </div>
                 )}
                  <div className="flex justify-between font-bold text-sm">
                     <p>Total:</p>
-                    <p>{currencySymbol}{formatCurrency(sale.totalAmount)}</p>
+                    <p>{getSymbol('USD')}{formatCurrency(sale.totalAmount, 'USD')}</p>
                 </div>
             </div>
-             {sale.payments && sale.payments.length > 0 && (
+            
+            <Separator className="my-1 border-dashed border-black" />
+            <div className="space-y-1">
+                <p className="font-semibold mb-1 text-center">Pagos:</p>
+                {sale.payments.map((p, index) => (
+                    <div key={index} className="flex justify-between">
+                        <span>{p.method}{p.reference ? ` (${p.reference})` : ''}:</span>
+                        <span>{getPaymentAmountInCorrectCurrency(p)}</span>
+                    </div>
+                ))}
+            </div>
+
+            {sale.changeGiven && sale.changeGiven.length > 0 && (
                  <>
                 <Separator className="my-1 border-dashed border-black" />
                 <div className="space-y-1">
-                    <p className="font-semibold mb-1 text-center">Pagos:</p>
-                    {sale.payments.map((p, index) => (
-                        <div key={index} className="flex justify-between">
-                            <span>{p.method}{p.reference ? ` (${p.reference})` : ''}:</span>
-                            <span>{getPaymentAmountInCorrectCurrency(p)}</span>
-                        </div>
-                    ))}
+                    <p className="font-semibold mb-1 text-center">Vuelto:</p>
+                    {sale.changeGiven.map((change, index) => {
+                        const isUSD = change.method === 'Efectivo USD';
+                        const symbol = isUSD ? getSymbol('USD') : getSymbol('Bs');
+                        return (
+                            <div key={index} className="flex justify-between font-bold">
+                                <p>{change.method}:</p>
+                                <p>{symbol}{formatCurrency(change.amount, isUSD ? 'USD' : 'Bs')}</p>
+                            </div>
+                        );
+                    })}
                 </div>
                 </>
             )}
+
              <Separator className="my-1 border-dashed border-black" />
              <div className="text-center mt-2">
                 <p>¡Gracias por su compra!</p>
@@ -96,14 +120,13 @@ export const handlePrintReceipt = (props: ReceiptViewProps, onError: (message: s
                         .font-mono { font-family: monospace; } .text-xs { font-size: 0.75rem; line-height: 1rem; }
                         .max-w-\\[215px\\] { max-width: 215px; } .mx-auto { margin-left: auto; margin-right: auto; }
                         .text-center { text-align: center; } .mb-2 { margin-bottom: 0.5rem; }
-                        .font-semibold { font-weight: 600; } .text-sm { font-size: 0.875rem; line-height: 1.25rem; }
                         .my-1 { margin-top: 0.25rem; margin-bottom: 0.25rem; } .border-dashed { border-style: dashed; }
                         .border-black { border-color: #000; } .flex { display: flex; } .flex-1 { flex: 1 1 0%; }
                         .w-1\\/4 { width: 25%; } .text-right { text-align: right; }
                         .space-y-1 > :not([hidden]) ~ :not([hidden]) { margin-top: 0.25rem; }
                         .break-words { overflow-wrap: break-word; } .justify-between { justify-content: space-between; }
                         .text-destructive { color: hsl(var(--destructive)); } .font-bold { font-weight: 700; }
-                        .mt-2 { margin-top: 0.5rem; } .mb-1 { margin-bottom: 0.25rem; }
+                        .mt-2 { margin-top: 0.5rem; } .mb-1 { margin-bottom: 0.25rem; } .text-sm { font-size: 0.875rem; line-height: 1.25rem; }
                     </style>
                 </head>
                 <body>
@@ -119,5 +142,3 @@ export const handlePrintReceipt = (props: ReceiptViewProps, onError: (message: s
         onError("No se pudo abrir la ventana de impresión. Revisa si tu navegador está bloqueando las ventanas emergentes.");
     }
 };
-
-    
