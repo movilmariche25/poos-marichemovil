@@ -295,7 +295,7 @@ function POSContent() {
     }
 
     return (
-        <div className="flex flex-col h-screen bg-slate-50">
+        <div className="flex flex-col flex-1 bg-slate-50">
              <header className="bg-white flex h-14 items-center gap-4 border-b px-4 sm:h-16 sm:px-6 flex-shrink-0">
                 <div className="flex items-center gap-2">
                     <SidebarTrigger />

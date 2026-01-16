@@ -83,7 +83,7 @@ export function CheckoutDialog({ cart, allProducts, total, children, onCheckout,
 
   const changeDifference = useMemo(() => totalChangeInUSD - totalGivenInUSD, [totalChangeInUSD, totalGivenInUSD]);
   
-  const canConfirm = totalPaid >= total && total > 0 && Math.abs(changeDifference) < 0.01;
+  const canConfirm = totalPaid >= total && total > 0 && (changePayments.length === 0 || Math.abs(changeDifference) < 0.01);
 
 
   const handleAddPayment = (method: PaymentMethod) => {
@@ -335,3 +335,4 @@ export function CheckoutDialog({ cart, allProducts, total, children, onCheckout,
     </Dialog>
   );
 }
+

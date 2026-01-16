@@ -1,4 +1,3 @@
-
 "use client";
 
 import type { Product } from "@/lib/types";
@@ -20,9 +19,12 @@ type ProductGridProps = {
   isLoading?: boolean;
 };
 
+const ITEMS_PER_PAGE = 25;
+
 export function ProductGrid({ products, onProductSelect, isLoading }: ProductGridProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const { format, getSymbol, getDynamicPrice } = useCurrency();
+  const [currentPage, setCurrentPage] = useState(1);
 
   const categories = useMemo(() => {
     if (!products) return ['Todos'];
@@ -43,6 +45,19 @@ export function ProductGrid({ products, onProductSelect, isLoading }: ProductGri
     ).sort((a, b) => a.name.localeCompare(b.name));
   }, [products, activeCategory, searchTerm]);
 
+  // Reset page to 1 when filters (category or search term) change.
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeCategory, searchTerm]);
+  
+  const { paginatedProducts, totalPages } = useMemo(() => {
+    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+    const endIndex = startIndex + ITEMS_PER_PAGE;
+    const paginated = filteredProducts.slice(startIndex, endIndex);
+    const pages = Math.ceil(filteredProducts.length / ITEMS_PER_PAGE);
+    return { paginatedProducts: paginated, totalPages: pages };
+  }, [currentPage, filteredProducts]);
+
   const getAvailableStock = (product: Product) => {
       if (product.isCombo) {
            if (!product.comboItems || product.comboItems.length === 0) return 0;
@@ -55,6 +70,14 @@ export function ProductGrid({ products, onProductSelect, isLoading }: ProductGri
            return Math.min(...stockCounts);
       }
       return product.stockLevel - (product.reservedStock || 0);
+  };
+  
+  const handlePreviousPage = () => {
+    setCurrentPage((prev) => Math.max(prev - 1, 1));
+  };
+
+  const handleNextPage = () => {
+    setCurrentPage((prev) => Math.min(prev + 1, totalPages));
   };
 
 
@@ -82,9 +105,9 @@ export function ProductGrid({ products, onProductSelect, isLoading }: ProductGri
                 />
             </div>
         </div>
-        <div className="relative flex-1">
+        <div className="relative flex-1 min-h-0">
           <ScrollArea className="absolute inset-0">
-            <div className="flex flex-wrap gap-4">
+            <div className="flex flex-wrap gap-4 pr-4">
                 {isLoading ? (
                     Array.from({ length: 10 }).map((_, i) => (
                         <Card key={`skeleton-${i}`} className="w-[150px]">
@@ -96,7 +119,7 @@ export function ProductGrid({ products, onProductSelect, isLoading }: ProductGri
                             </CardFooter>
                         </Card>
                     ))
-                ) : filteredProducts.map((product) => {
+                ) : paginatedProducts.map((product) => {
                     const availableStock = getAvailableStock(product);
                     const promoPrice = (typeof product.promoPrice === 'number' && product.promoPrice > 0) ? product.promoPrice : 0;
                     const hasPromo = promoPrice > 0;
@@ -136,6 +159,29 @@ export function ProductGrid({ products, onProductSelect, isLoading }: ProductGri
             </div>
           </ScrollArea>
         </div>
+         {totalPages > 1 && (
+            <div className="flex items-center justify-end space-x-2 pt-4 flex-shrink-0">
+                <span className="text-sm text-muted-foreground">
+                    Página {currentPage} de {totalPages}
+                </span>
+                <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handlePreviousPage}
+                    disabled={currentPage === 1}
+                >
+                    Anterior
+                </Button>
+                <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleNextPage}
+                    disabled={currentPage >= totalPages}
+                >
+                    Siguiente
+                </Button>
+            </div>
+        )}
     </div>
   );
 }
