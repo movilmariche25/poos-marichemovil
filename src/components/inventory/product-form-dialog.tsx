@@ -52,6 +52,7 @@ const formSchema = z.object({
   hasPromoPrice: z.boolean().optional(),
   promoPrice: z.coerce.number().optional(),
   stockLevel: z.coerce.number().int({ message: "El stock debe ser un número entero." }).min(0, "El stock no puede ser negativo."),
+  damagedStock: z.coerce.number().int().min(0).optional(),
   lowStockThreshold: z.coerce.number().int({ message: "El umbral debe ser un número entero." }).min(1, "La alerta debe ser al menos 1."),
   compatibleModels: z.string().optional(),
   isCombo: z.boolean().optional(),
@@ -93,6 +94,7 @@ export function ProductFormDialog({ product, children, productCount = 0 }: Produ
       hasPromoPrice: false,
       promoPrice: 0,
       stockLevel: 1,
+      damagedStock: 0,
       lowStockThreshold: 1,
       compatibleModels: "",
       isCombo: false,
@@ -149,6 +151,7 @@ export function ProductFormDialog({ product, children, productCount = 0 }: Produ
               isCombo: product.isCombo || false,
               comboItems: product.comboItems || [],
               isGiftable: product.isGiftable || false,
+              damagedStock: product.damagedStock || 0,
             });
         } else {
             form.reset({
@@ -159,6 +162,7 @@ export function ProductFormDialog({ product, children, productCount = 0 }: Produ
                 hasPromoPrice: false,
                 promoPrice: 0,
                 stockLevel: 1,
+                damagedStock: 0,
                 lowStockThreshold: 1,
                 compatibleModels: "",
                 isCombo: false,
@@ -193,7 +197,7 @@ export function ProductFormDialog({ product, children, productCount = 0 }: Produ
         compatibleModels: compatibleModelsArray,
         promoPrice: hasPromoPrice ? values.promoPrice : 0,
         reservedStock: product?.reservedStock || 0,
-        damagedStock: product?.damagedStock || 0,
+        damagedStock: values.damagedStock || 0,
         comboItems: values.isCombo ? values.comboItems : [],
         costPrice: values.isCombo ? comboCost : values.costPrice,
         isGiftable: values.isGiftable || false,
@@ -486,18 +490,31 @@ export function ProductFormDialog({ product, children, productCount = 0 }: Produ
               />
                <FormField
                 control={form.control}
-                name="lowStockThreshold"
+                name="damagedStock"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Alerta de Stock Bajo</FormLabel>
+                    <FormLabel>Stock Dañado</FormLabel>
                     <FormControl>
-                      <Input type="number" {...field} />
+                      <Input type="number" {...field} onChange={e => field.onChange(Number(e.target.value) || 0)} disabled={isCombo}/>
                     </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
               />
             </div>
+            <FormField
+              control={form.control}
+              name="lowStockThreshold"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Alerta de Stock Bajo</FormLabel>
+                  <FormControl>
+                    <Input type="number" {...field} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
             <DialogFooter>
               <Button type="submit">{isEditing ? 'Guardar Cambios' : 'Añadir Producto'}</Button>
             </DialogFooter>
@@ -507,5 +524,3 @@ export function ProductFormDialog({ product, children, productCount = 0 }: Produ
     </Dialog>
   );
 }
-
-    

@@ -111,7 +111,7 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
                 const repairJobData = repairJobDoc.data() as RepairJob;
                 
                 // When a repair is paid, the reserved parts are "consumed".
-                // We decrease reserved stock and increase damaged/consumed stock.
+                // We decrease reserved stock and total stock level.
                 if (repairJobData.reservedParts && repairJobData.reservedParts.length > 0) {
                     for (const part of repairJobData.reservedParts) {
                         const productRef = doc(firestore, 'products', part.productId);
@@ -119,10 +119,10 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
                         if (productDoc.exists()) {
                             const productData = productDoc.data() as Product;
                             const newReservedStock = (productData.reservedStock || 0) - part.quantity;
-                            const newDamagedStock = (productData.damagedStock || 0) + part.quantity;
+                            const newStockLevel = productData.stockLevel - part.quantity;
                             transaction.update(productRef, { 
-                                reservedStock: newReservedStock < 0 ? 0 : newReservedStock,
-                                damagedStock: newDamagedStock,
+                                reservedStock: Math.max(0, newReservedStock),
+                                stockLevel: Math.max(0, newStockLevel),
                             });
                         }
                     }
@@ -130,8 +130,7 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
                 continue;
             }
 
-            // For direct sales, we mark the item as 'damaged' to remove it from available stock
-            // without touching the 'stockLevel' which is user-controlled.
+            // For direct sales, we decrement the stock level.
             const productRef = doc(firestore, 'products', item.productId);
             const productDoc = await transaction.get(productRef);
             if (!productDoc.exists()) {
@@ -148,12 +147,13 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
                    throw new Error(`Componente ${comboItem.productName} del combo no encontrado.`);
                 }
                 const componentData = componentDoc.data() as Product;
-                const newDamagedStock = (componentData.damagedStock || 0) + (comboItem.quantity * item.quantity);
-                transaction.update(componentRef, { damagedStock: newDamagedStock });
+                const quantityToDecrement = comboItem.quantity * item.quantity;
+                const newStockLevel = componentData.stockLevel - quantityToDecrement;
+                transaction.update(componentRef, { stockLevel: Math.max(0, newStockLevel) });
               }
             } else {
-              const newDamagedStock = (product.damagedStock || 0) + item.quantity;
-              transaction.update(productRef, { damagedStock: newDamagedStock });
+              const newStockLevel = product.stockLevel - item.quantity;
+              transaction.update(productRef, { stockLevel: Math.max(0, newStockLevel) });
             }
           }
         });
