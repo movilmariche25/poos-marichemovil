@@ -248,6 +248,9 @@ export function CheckoutDialog({ cart, allProducts, total, children, onCheckout,
                     <p className="text-sm">Monto Restante</p>
                     <div className={cn("font-bold", totalPaid < total ? 'text-destructive' : 'text-green-600')}>
                         <p className="text-2xl">{getSymbol('USD')}{formatCurrency(Math.max(0, total - totalPaid), 'USD')}</p>
+                        <p className="text-xs text-secondary-foreground/80">
+                            o Bs {formatCurrency(convert(Math.max(0, total - totalPaid), 'USD', 'Bs'), 'Bs')}
+                        </p>
                     </div>
                  </div>
 
