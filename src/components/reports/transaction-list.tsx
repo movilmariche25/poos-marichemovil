@@ -51,20 +51,43 @@ const RefundButton = ({ sale }: { sale: Sale }) => {
             await runTransaction(firestore, async (transaction) => {
                 // 1. Update product stock based on user selection
                 for (const item of sale.items) {
-                    if (!item.isRepair) {
-                        const productRef = doc(firestore, 'products', item.productId);
-                        const productDoc = await transaction.get(productRef);
-                        if (productDoc.exists()) {
-                            const product = productDoc.data() as Product;
-                            const currentDamagedStock = product.damagedStock || 0;
-                            if (stockAction === 'return') {
-                                 // To "return" stock, we decrease the damaged/consumed amount
-                                 const newDamagedStock = currentDamagedStock - item.quantity;
-                                 transaction.update(productRef, { damagedStock: Math.max(0, newDamagedStock) });
-                            } else { // 'damage' - stock was already considered damaged/consumed, so no change needed
-                                 // No change to stock counters, as the refund doesn't make the part usable again.
+                    if (item.isRepair) continue;
+
+                    const productRef = doc(firestore, 'products', item.productId);
+                    const productDoc = await transaction.get(productRef);
+                    
+                    if (!productDoc.exists()) {
+                        console.warn(`Product with ID ${item.productId} not found during refund. Skipping stock update.`);
+                        continue;
+                    }
+                    
+                    const productData = productDoc.data() as Product;
+
+                    if (productData.isCombo && productData.comboItems) {
+                        // For combo products, return each component to stock
+                        for (const comboItem of productData.comboItems) {
+                            const componentRef = doc(firestore, 'products', comboItem.productId);
+                            const componentDoc = await transaction.get(componentRef);
+                            if (componentDoc.exists()) {
+                                let { stockLevel, damagedStock = 0 } = componentDoc.data() as Product;
+                                const quantityToReturn = comboItem.quantity * item.quantity;
+                                
+                                stockLevel += quantityToReturn;
+                                if (stockAction === 'damage') {
+                                    damagedStock += quantityToReturn;
+                                }
+                                transaction.update(componentRef, { stockLevel, damagedStock });
                             }
                         }
+                    } else {
+                        // For simple products
+                        let { stockLevel, damagedStock = 0 } = productData;
+                        
+                        stockLevel += item.quantity;
+                        if (stockAction === 'damage') {
+                            damagedStock += item.quantity;
+                        }
+                        transaction.update(productRef, { stockLevel, damagedStock });
                     }
                 }
 
@@ -79,7 +102,7 @@ const RefundButton = ({ sale }: { sale: Sale }) => {
 
             toast({
                 title: "Reembolso Completado",
-                description: `La venta ${sale.id} ha sido marcada como reembolsada.`
+                description: `La venta ${sale.id} ha sido marcada como reembolsada y el stock ajustado.`
             });
 
         } catch (error) {
@@ -137,7 +160,7 @@ const RefundButton = ({ sale }: { sale: Sale }) => {
                             />
                         </div>
                         <div>
-                            <Label>¿A dónde debe ir el stock devuelto?</Label>
+                            <Label>Acción de inventario para los productos devueltos</Label>
                             <RadioGroup 
                                 defaultValue="return" 
                                 className="mt-2 space-y-2"
@@ -146,11 +169,11 @@ const RefundButton = ({ sale }: { sale: Sale }) => {
                             >
                                 <div className="flex items-center space-x-2">
                                     <RadioGroupItem value="return" id="r1" />
-                                    <Label htmlFor="r1">Devolver a Stock Disponible (aumenta Stock Total)</Label>
+                                    <Label htmlFor="r1">Devolver a stock disponible (para revender)</Label>
                                 </div>
                                 <div className="flex items-center space-x-2">
                                     <RadioGroupItem value="damage" id="r2" />
-                                    <Label htmlFor="r2">Mover a Stock Dañado (no afecta Stock Total)</Label>
+                                    <Label htmlFor="r2">Devolver a stock dañado (no se puede revender)</Label>
                                 </div>
                             </RadioGroup>
                         </div>
@@ -319,3 +342,5 @@ export function TransactionList({ sales, isLoading }: TransactionListProps) {
         </Accordion>
     )
 }
+
+    

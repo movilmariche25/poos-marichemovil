@@ -10,12 +10,13 @@ import { useCurrency } from "@/hooks/use-currency";
 import { useFirebase } from "@/firebase";
 import { useToast } from "@/hooks/use-toast";
 import { collection, doc, writeBatch } from "firebase/firestore";
-import { format as formatDate } from "date-fns";
-import { DoorClosed, Loader2 } from "lucide-react";
+import { format as formatDate, parseISO } from "date-fns";
+import { DoorClosed, Loader2, Printer } from "lucide-react";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { cn } from "@/lib/utils";
+import { ReconciliationTicket, handlePrintReconciliation } from "./reconciliation-ticket";
 
 type CashReconciliationDialogProps = {
   openSales: Sale[];
@@ -26,9 +27,11 @@ const paymentMethodsOrder: PaymentMethod[] = ['Efectivo USD', 'Efectivo Bs', 'Ta
 export function CashReconciliationDialog({ openSales }: CashReconciliationDialogProps) {
   const { firestore } = useFirebase();
   const { toast } = useToast();
-  const { format: formatCurrency, getSymbol, convert } = useCurrency();
+  const currency = useCurrency();
+  const { format: formatCurrency, getSymbol, convert } = currency;
   const [isOpen, setIsOpen] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
+  const [completedReconciliation, setCompletedReconciliation] = useState<DailyReconciliation | null>(null);
   const [countedAmounts, setCountedAmounts] = useState<Record<PaymentMethod, number>>({
     'Efectivo USD': 0,
     'Efectivo Bs': 0,
@@ -70,7 +73,6 @@ export function CashReconciliationDialog({ openSales }: CashReconciliationDialog
         if (typedMethod === 'Efectivo USD') {
             return acc + amount;
         }
-        // All other methods (Efectivo Bs, Tarjeta, Pago Móvil) are in Bs and need conversion
         return acc + convert(amount, 'Bs', 'USD');
      }, 0)
   }, [countedAmounts, convert]);
@@ -82,6 +84,29 @@ export function CashReconciliationDialog({ openSales }: CashReconciliationDialog
     setCountedAmounts(prev => ({ ...prev, [method]: parseFloat(value) || 0 }));
   };
 
+  const handleFinishAndReset = () => {
+    setIsOpen(false);
+    setCompletedReconciliation(null);
+    setCountedAmounts({
+      'Efectivo USD': 0,
+      'Efectivo Bs': 0,
+      'Tarjeta': 0,
+      'Pago Móvil': 0,
+      'Transferencia': 0,
+    });
+  };
+  
+  const onPrint = () => {
+    if (!completedReconciliation) return;
+    handlePrintReconciliation({ reconciliation: completedReconciliation, currency }, (error) => {
+      toast({
+        variant: "destructive",
+        title: "Error de Impresión",
+        description: error,
+      });
+    });
+  };
+
   const handleCloseDay = async () => {
     if (!firestore || transactionCount === 0) return;
     setIsClosing(true);
@@ -89,12 +114,11 @@ export function CashReconciliationDialog({ openSales }: CashReconciliationDialog
     const todayStr = formatDate(new Date(), 'yyyy-MM-dd');
     const reconciliationId = `RECON-${todayStr}`;
     
-    // Check for negative counted values, which are not allowed
     if (Object.values(countedAmounts).some(amount => amount < 0)) {
         toast({
             variant: "destructive",
             title: "Monto Inválido",
-            description: "Los montos contados no pueden ser negativos. Por favor, revisa los valores.",
+            description: "Los montos contados no pueden ser negativos.",
         });
         setIsClosing(false);
         return;
@@ -138,8 +162,7 @@ export function CashReconciliationDialog({ openSales }: CashReconciliationDialog
         title: "Día Cerrado Exitosamente",
         description: `Se han cerrado ${transactionCount} ventas.`,
       });
-      setIsOpen(false);
-      setCountedAmounts({ 'Efectivo USD': 0, 'Efectivo Bs': 0, 'Tarjeta': 0, 'Pago Móvil': 0, 'Transferencia': 0 });
+      setCompletedReconciliation(newReconciliation);
     } catch (error) {
       console.error("Error closing day:", error);
       toast({
@@ -153,7 +176,13 @@ export function CashReconciliationDialog({ openSales }: CashReconciliationDialog
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={setIsOpen}>
+    <Dialog open={isOpen} onOpenChange={(val) => {
+        if (!val) {
+            handleFinishAndReset();
+        } else {
+            setIsOpen(true);
+        }
+    }}>
       <Card>
         <CardHeader>
           <CardTitle>Cierre de Ventas del Día</CardTitle>
@@ -178,75 +207,98 @@ export function CashReconciliationDialog({ openSales }: CashReconciliationDialog
         </CardContent>
       </Card>
       <DialogContent className="max-w-3xl">
-        <DialogHeader>
-          <DialogTitle>Cuadre de Caja - {formatDate(new Date(), "PPP")}</DialogTitle>
-          <DialogDescription>
-            Introduce los montos contados para cada método de pago para finalizar el día.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 py-4">
-            <div className="space-y-4">
-                <h3 className="font-semibold text-lg">Montos Contados</h3>
-                {paymentMethodsOrder.map(method => (
-                    <div key={method}>
-                        <Label htmlFor={`counted-${method}`} className="text-base">{method}</Label>
-                        <div className="relative mt-1">
-                            <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-                                <span className="text-gray-500 sm:text-sm">{getSymbol(method === 'Efectivo USD' ? 'USD' : 'Bs')}</span>
+        {completedReconciliation ? (
+            <>
+                <DialogHeader>
+                    <DialogTitle>Cierre Completado</DialogTitle>
+                    <DialogDescription>
+                        El cierre de caja para el {formatDate(parseISO(completedReconciliation.closedAt), "PPP")} ha sido guardado.
+                    </DialogDescription>
+                </DialogHeader>
+                <div className="py-4">
+                    <ReconciliationTicket reconciliation={completedReconciliation} currency={currency} />
+                </div>
+                <DialogFooter>
+                    <Button onClick={onPrint} variant="outline">
+                        <Printer className="mr-2 h-4 w-4" />
+                        Imprimir
+                    </Button>
+                    <Button onClick={handleFinishAndReset}>Finalizar</Button>
+                </DialogFooter>
+            </>
+        ) : (
+            <>
+                <DialogHeader>
+                <DialogTitle>Cuadre de Caja - {formatDate(new Date(), "PPP")}</DialogTitle>
+                <DialogDescription>
+                    Introduce los montos contados para cada método de pago para finalizar el día.
+                </DialogDescription>
+                </DialogHeader>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 py-4">
+                    <div className="space-y-4">
+                        <h3 className="font-semibold text-lg">Montos Contados</h3>
+                        {paymentMethodsOrder.map(method => (
+                            <div key={method}>
+                                <Label htmlFor={`counted-${method}`} className="text-base">{method}</Label>
+                                <div className="relative mt-1">
+                                    <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                                        <span className="text-gray-500 sm:text-sm">{getSymbol(method === 'Efectivo USD' ? 'USD' : 'Bs')}</span>
+                                    </div>
+                                    <Input
+                                        id={`counted-${method}`}
+                                        type="number"
+                                        value={countedAmounts[method] || ''}
+                                        onChange={(e) => handleAmountChange(method, e.target.value)}
+                                        placeholder="0.00"
+                                        className="pl-7 text-lg h-12"
+                                    />
+                                </div>
                             </div>
-                             <Input
-                                id={`counted-${method}`}
-                                type="number"
-                                value={countedAmounts[method] || ''}
-                                onChange={(e) => handleAmountChange(method, e.target.value)}
-                                placeholder="0.00"
-                                className="pl-7 text-lg h-12"
-                            />
+                        ))}
+                    </div>
+                    <div className="space-y-4 p-4 bg-muted/50 rounded-lg">
+                        <h3 className="font-semibold text-lg">Resumen del Cuadre</h3>
+                        {paymentMethodsOrder.map(method => {
+                            if (expectedAmounts[method] === 0 && countedAmounts[method] === 0) return null;
+                            const symbol = getSymbol(method === 'Efectivo USD' ? 'USD' : 'Bs');
+                            const difference = differences[method];
+                            return (
+                                <div key={method} className="p-3 bg-background rounded-md">
+                                    <p className="font-medium">{method}</p>
+                                    <div className="flex justify-between text-sm">
+                                        <span>Esperado:</span>
+                                        <span>{symbol}{formatCurrency(expectedAmounts[method])}</span>
+                                    </div>
+                                    <div className="flex justify-between text-sm">
+                                        <span>Contado:</span>
+                                        <span>{symbol}{formatCurrency(countedAmounts[method])}</span>
+                                    </div>
+                                    <div className={cn("flex justify-between text-sm font-semibold", difference < 0 ? 'text-destructive' : 'text-green-600')}>
+                                        <span>Diferencia:</span>
+                                        <span>{difference >= 0 ? '+' : ''}{symbol}{formatCurrency(difference)}</span>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                        <div className="border-t pt-4 mt-4">
+                            <div className="flex justify-between font-bold text-lg">
+                                <span>Diferencia Total (en USD):</span>
+                                <span className={cn(totalDifference < 0 ? 'text-destructive' : 'text-green-600')}>
+                                    {totalDifference >= 0 ? '+' : ''}{getSymbol()}{formatCurrency(totalDifference)}
+                                </span>
+                            </div>
                         </div>
                     </div>
-                ))}
-            </div>
-             <div className="space-y-4 p-4 bg-muted/50 rounded-lg">
-                <h3 className="font-semibold text-lg">Resumen del Cuadre</h3>
-                 {paymentMethodsOrder.map(method => {
-                    if (expectedAmounts[method] === 0 && countedAmounts[method] === 0) return null;
-                    const symbol = getSymbol(method === 'Efectivo USD' ? 'USD' : 'Bs');
-                    const difference = differences[method];
-                    return (
-                        <div key={method} className="p-3 bg-background rounded-md">
-                            <p className="font-medium">{method}</p>
-                            <div className="flex justify-between text-sm">
-                                <span>Esperado:</span>
-                                <span>{symbol}{formatCurrency(expectedAmounts[method])}</span>
-                            </div>
-                            <div className="flex justify-between text-sm">
-                                <span>Contado:</span>
-                                <span>{symbol}{formatCurrency(countedAmounts[method])}</span>
-                            </div>
-                            <div className={cn("flex justify-between text-sm font-semibold", difference < 0 ? 'text-destructive' : 'text-green-600')}>
-                                <span>Diferencia:</span>
-                                <span>{difference >= 0 ? '+' : ''}{symbol}{formatCurrency(difference)}</span>
-                            </div>
-                        </div>
-                    );
-                 })}
-                 <div className="border-t pt-4 mt-4">
-                    <div className="flex justify-between font-bold text-lg">
-                        <span>Diferencia Total (en USD):</span>
-                         <span className={cn(totalDifference < 0 ? 'text-destructive' : 'text-green-600')}>
-                            {totalDifference >= 0 ? '+' : ''}{getSymbol()}{formatCurrency(totalDifference)}
-                        </span>
-                    </div>
-                 </div>
-            </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => setIsOpen(false)}>Cancelar</Button>
-          <Button onClick={handleCloseDay} disabled={isClosing}>
-            {isClosing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-            {isClosing ? 'Cerrando...' : 'Finalizar y Cerrar Día'}
-          </Button>
-        </DialogFooter>
+                </div>
+                <DialogFooter>
+                <Button variant="outline" onClick={() => setIsOpen(false)}>Cancelar</Button>
+                <Button onClick={handleCloseDay} disabled={isClosing}>
+                    {isClosing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                    {isClosing ? 'Cerrando...' : 'Finalizar y Cerrar Día'}
+                </Button>
+                </DialogFooter>
+            </>
+        )}
       </DialogContent>
     </Dialog>
   );

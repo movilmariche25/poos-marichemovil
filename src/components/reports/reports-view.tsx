@@ -77,7 +77,7 @@ export function ReportsView({ sales, products, repairJobs, isLoading }: ReportsV
                         <CardDescription>Exporta un registro de ventas en formato Excel para un rango de fechas seleccionado.</CardDescription>
                     </CardHeader>
                     <CardContent>
-                        <ExportSalesButton sales={sales} products={products} />
+                        <ExportSalesButton sales={sales} products={products} repairJobs={repairJobs || []} />
                     </CardContent>
                  </Card>
             </TabsContent>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { addDays, format } from "date-fns";
+import { addDays, format, isWithinInterval, startOfDay, endOfDay } from "date-fns";
 import { DateRange } from "react-day-picker";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,48 +11,77 @@ import {
 } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { Calendar as CalendarIcon, FileDown } from "lucide-react";
-import type { Product, Sale } from "@/lib/types";
+import type { Product, Sale, RepairJob } from "@/lib/types";
 import { es } from "date-fns/locale";
 import * as XLSX from "xlsx";
 import { useCurrency } from "@/hooks/use-currency";
+import { useToast } from "@/hooks/use-toast";
 
 type ExportSalesButtonProps = {
   sales: Sale[];
   products: Product[];
+  repairJobs: RepairJob[];
 };
 
-export function ExportSalesButton({ sales, products }: ExportSalesButtonProps) {
+export function ExportSalesButton({ sales, products, repairJobs }: ExportSalesButtonProps) {
   const [date, setDate] = useState<DateRange | undefined>({
     from: new Date(),
     to: new Date(),
   });
   const { convert } = useCurrency();
+  const { toast } = useToast();
+
 
   const handleExport = () => {
-    if (!date?.from || !date?.to) {
-      alert("Por favor, selecciona un rango de fechas.");
+    if (!date?.from) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Por favor, selecciona un rango de fechas.",
+      });
       return;
     }
+    
+    const from = startOfDay(date.from);
+    const to = date.to ? endOfDay(date.to) : endOfDay(date.from);
 
     const filteredSales = sales.filter((sale) => {
       const saleDate = new Date(sale.transactionDate);
-      return saleDate >= date.from! && saleDate <= date.to!;
+      return isWithinInterval(saleDate, { start: from, end: to });
     });
+
+    if (filteredSales.length === 0) {
+        toast({
+            title: "No hay datos",
+            description: "No se encontraron ventas en el rango de fechas seleccionado."
+        });
+        return;
+    }
     
     const dataToExport = filteredSales.flatMap(sale => {
         return sale.items.map(item => {
-            const product = products.find(p => p.id === item.productId);
-            const costPrice = item.isRepair ? 0 : (product?.costPrice || 0);
+            let productName = item.name;
+            let costPrice = 0;
+
+            if (item.isRepair) {
+                const repairJob = repairJobs.find(job => job.id === sale.repairJobId);
+                if (repairJob && repairJob.reservedParts && repairJob.reservedParts.length > 0) {
+                    const mainPart = repairJob.reservedParts[0];
+                    productName = `Reparación (${mainPart.productName}): ${item.name}`;
+                    costPrice = mainPart.costPrice;
+                }
+            } else {
+                const product = products.find(p => p.id === item.productId);
+                costPrice = product?.costPrice || 0;
+            }
+
             const profit = (item.price * item.quantity) - (costPrice * item.quantity);
             const payments = sale.payments.map(p => `${p.method}: ${p.amount}`).join('; ');
             const totalBs = convert(sale.totalAmount, 'USD', 'Bs');
 
             return {
-                'ID Venta': sale.id,
                 'Fecha': format(new Date(sale.transactionDate), 'yyyy-MM-dd HH:mm:ss'),
-                'Estado': sale.status,
-                'Producto ID': item.productId,
-                'Producto Nombre': item.name,
+                'Producto Vendido': productName,
                 'Cantidad': item.quantity,
                 'Precio Unitario ($)': item.price,
                 'Costo Unitario ($)': costPrice,
@@ -63,7 +92,7 @@ export function ExportSalesButton({ sales, products }: ExportSalesButtonProps) {
                 'Total Venta ($)': sale.totalAmount,
                 'Total Venta (Bs)': totalBs,
                 'Pagos': payments,
-                'ID Reparación': sale.repairJobId || '',
+                'Estado Venta': sale.status,
                 'Motivo Reembolso': sale.refundReason || ''
             }
         })
@@ -81,7 +110,7 @@ export function ExportSalesButton({ sales, products }: ExportSalesButtonProps) {
     worksheet["!cols"] = colWidths;
 
 
-    XLSX.writeFile(workbook, `Ventas_${format(date.from, "yyyy-MM-dd")}_a_${format(date.to, "yyyy-MM-dd")}.xlsx`);
+    XLSX.writeFile(workbook, `Ventas_${format(from, "yyyy-MM-dd")}_a_${format(to, "yyyy-MM-dd")}.xlsx`);
   };
 
   return (
@@ -120,7 +149,7 @@ export function ExportSalesButton({ sales, products }: ExportSalesButtonProps) {
           />
         </PopoverContent>
       </Popover>
-      <Button onClick={handleExport} disabled={!date?.from || !date?.to}>
+      <Button onClick={handleExport} disabled={!date?.from}>
         <FileDown className="mr-2 h-4 w-4" />
         Exportar a Excel
       </Button>
