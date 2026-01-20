@@ -86,12 +86,18 @@ export function ReceiptView({ sale, currency }: ReceiptViewProps) {
                         const isUSD = change.method === 'Efectivo USD';
                         const symbol = isUSD ? getSymbol('USD') : getSymbol('Bs');
                         return (
-                            <div key={index} className="flex justify-between font-bold">
-                                <p>{change.method}:</p>
-                                <p>{symbol}{formatCurrency(change.amount, isUSD ? 'USD' : 'Bs')}</p>
+                            <div key={index} className="flex justify-between">
+                                <span>{change.method}:</span>
+                                <span>{symbol}{formatCurrency(change.amount, isUSD ? 'USD' : 'Bs')}</span>
                             </div>
                         );
                     })}
+                    {sale.totalChangeInUSD && sale.totalChangeInUSD > 0 && (
+                        <div className="flex justify-between font-bold border-t border-dashed border-black mt-1 pt-1">
+                            <span>Total Vuelto (USD):</span>
+                            <span>{getSymbol('USD')}{formatCurrency(sale.totalChangeInUSD, 'USD')}</span>
+                        </div>
+                    )}
                 </div>
                 </>
             )}
@@ -127,6 +133,7 @@ export const handlePrintReceipt = (props: ReceiptViewProps, onError: (message: s
                         .break-words { overflow-wrap: break-word; } .justify-between { justify-content: space-between; }
                         .text-destructive { color: hsl(var(--destructive)); } .font-bold { font-weight: 700; }
                         .mt-2 { margin-top: 0.5rem; } .mb-1 { margin-bottom: 0.25rem; } .text-sm { font-size: 0.875rem; line-height: 1.25rem; }
+                        .border-t { border-top-width: 1px; } .mt-1 { margin-top: 0.25rem; } .pt-1 { padding-top: 0.25rem; }
                     </style>
                 </head>
                 <body>

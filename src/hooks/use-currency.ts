@@ -20,7 +20,7 @@ export const useCurrency = () => {
     const parallelRate = settings?.parallelRate || 1; // Tasa de Reposicion
     const profitMargin = settings?.profitMargin || 100; // Margen de Ganancia
 
-    const format = (value: number, targetCurrency?: Currency) => {
+    const format = useCallback((value: number, targetCurrency?: Currency) => {
         const c = targetCurrency || currency;
         
         let displayValue = value;
@@ -33,19 +33,19 @@ export const useCurrency = () => {
         });
 
         return formatter.format(displayValue);
-    };
+    }, [currency]);
 
-    const getSymbol = (targetCurrency?: Currency) => {
+    const getSymbol = useCallback((targetCurrency?: Currency) => {
         const c = targetCurrency || currency;
         return c === 'Bs' ? 'Bs ' : '$';
-    }
+    }, [currency]);
 
-    const convert = (value: number, from: Currency, to: Currency) => {
+    const convert = useCallback((value: number, from: Currency, to: Currency) => {
         if (from === to) return value;
         if (from === 'USD' && to === 'Bs') return value * bcvRate;
         if (from === 'Bs' && to === 'USD') return value / bcvRate;
         return value;
-    }
+    }, [bcvRate]);
 
     const getDynamicPrice = useCallback((costPrice: number) => {
         if (!settings || costPrice <= 0) return 0;

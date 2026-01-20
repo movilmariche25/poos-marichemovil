@@ -45,21 +45,22 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
   const [activeRepairJob, setActiveRepairJob] = useState<RepairJob | null>(null);
 
    useEffect(() => {
-    if (repairJobId) {
-      const repairJobStr = new URLSearchParams(window.location.search).get('repairJob');
-      if (repairJobStr) {
-        try {
-          const job: RepairJob = JSON.parse(decodeURIComponent(repairJobStr));
-          setActiveRepairJob(job);
-        } catch (e) {
-          console.error("Failed to parse repair job from URL for CartDisplay", e);
-          setActiveRepairJob(null);
+    const fetchRepairJob = async () => {
+        if (repairJobId && firestore) {
+            try {
+                 const repairJobRef = doc(firestore, 'repair_jobs', repairJobId);
+                 const repairJobDoc = await getDoc(repairJobRef);
+                 if (repairJobDoc.exists()) {
+                    setActiveRepairJob(repairJobDoc.data() as RepairJob);
+                 }
+            } catch (e) {
+              console.error("Failed to fetch repair job for CartDisplay", e);
+              setActiveRepairJob(null);
+            }
         }
-      }
-    } else {
-        setActiveRepairJob(null);
-    }
-  }, [repairJobId]);
+    };
+    fetchRepairJob();
+  }, [repairJobId, firestore]);
 
 
   const getPrice = (item: CartItem) => {
@@ -106,25 +107,20 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
       try {
         await runTransaction(firestore, async (transaction) => {
           for (const item of cartWithFinalPrices) {
-            if (item.isRepair) {
-                const repairJobDoc = await transaction.get(doc(firestore, 'repair_jobs', repairJobId!));
-                const repairJobData = repairJobDoc.data() as RepairJob;
-                
+            if (item.isRepair && activeRepairJob?.reservedParts) {
                 // When a repair is paid, the reserved parts are "consumed".
                 // We decrease reserved stock and total stock level.
-                if (repairJobData.reservedParts && repairJobData.reservedParts.length > 0) {
-                    for (const part of repairJobData.reservedParts) {
-                        const productRef = doc(firestore, 'products', part.productId);
-                        const productDoc = await transaction.get(productRef);
-                        if (productDoc.exists()) {
-                            const productData = productDoc.data() as Product;
-                            const newReservedStock = (productData.reservedStock || 0) - part.quantity;
-                            const newStockLevel = productData.stockLevel - part.quantity;
-                            transaction.update(productRef, { 
-                                reservedStock: Math.max(0, newReservedStock),
-                                stockLevel: Math.max(0, newStockLevel),
-                            });
-                        }
+                for (const part of activeRepairJob.reservedParts) {
+                    const productRef = doc(firestore, 'products', part.productId);
+                    const productDoc = await transaction.get(productRef);
+                    if (productDoc.exists()) {
+                        const productData = productDoc.data() as Product;
+                        const newReservedStock = (productData.reservedStock || 0) - part.quantity;
+                        const newStockLevel = productData.stockLevel - part.quantity;
+                        transaction.update(productRef, { 
+                            reservedStock: Math.max(0, newReservedStock),
+                            stockLevel: Math.max(0, newStockLevel),
+                        });
                     }
                 }
                 continue;
@@ -167,22 +163,21 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
         return null;
       }
       
-      if (repairJobId) {
+      if (repairJobId && activeRepairJob) {
         const repairJobRef = doc(firestore, 'repair_jobs', repairJobId);
-        const repairJobDoc = await getDoc(repairJobRef);
-        const repairJobData = repairJobDoc.data() as RepairJob;
         
-        if (repairJobData) {
-            const currentAmountPaid = repairJobData.amountPaid || 0;
-            const newTotalPaid = currentAmountPaid + total;
-            const isNowPaidInFull = newTotalPaid >= repairJobData.estimatedCost;
+        const repairItemInCart = cartWithFinalPrices.find(item => item.isRepair);
+        const paymentForRepair = repairItemInCart ? (repairItemInCart.price * repairItemInCart.quantity) : 0;
+        
+        const currentAmountPaid = activeRepairJob.amountPaid || 0;
+        const newTotalPaid = currentAmountPaid + paymentForRepair;
+        const isNowPaidInFull = newTotalPaid >= activeRepairJob.estimatedCost;
 
-            batch.set(repairJobRef, { 
-                status: 'Completado', 
-                amountPaid: newTotalPaid,
-                isPaid: isNowPaidInFull,
-            }, { merge: true });
-        }
+        batch.set(repairJobRef, { 
+            status: 'Completado', 
+            amountPaid: newTotalPaid,
+            isPaid: isNowPaidInFull,
+        }, { merge: true });
       }
       
       const saleId = generateSaleId();
@@ -195,6 +190,7 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
           transactionDate: new Date().toISOString(),
           payments: payments,
           ...(repairJobId && { repairJobId }),
+          ...(activeRepairJob?.reservedParts && { consumedParts: activeRepairJob.reservedParts }),
           ...(changeGiven && changeGiven.length > 0 && { 
             changeGiven,
             totalChangeInUSD
@@ -290,7 +286,7 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
                                 <div className="text-xs text-muted-foreground">Bs {formatCurrency(totalItemPriceBs, 'Bs')}</div>
                             </TableCell>
                             <TableCell>
-                               <Button variant="ghost" size="icon" className="w-6 h-6" onClick={() => onRemoveItem(item.productId)} disabled={item.isRepair}>
+                               <Button variant="ghost" size="icon" className="w-6 h-6" onClick={() => onRemoveItem(item.productId)}>
                                     <Trash2 className="w-4 h-4 text-destructive" />
                                 </Button>
                             </TableCell>

@@ -2,7 +2,7 @@
 
 "use client"
 
-import type { Sale, Payment, Product, CartItem } from "@/lib/types";
+import type { Sale, Payment, Product, CartItem, RepairJob } from "@/lib/types";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { format, parseISO } from "date-fns";
 import { es } from "date-fns/locale";
@@ -49,9 +49,62 @@ const RefundButton = ({ sale }: { sale: Sale }) => {
         
         try {
             await runTransaction(firestore, async (transaction) => {
-                // 1. Update product stock based on user selection
+                 // If the sale is for a repair, handle the repair and its parts first.
+                if (sale.repairJobId) {
+                    const repairJobRef = doc(firestore, 'repair_jobs', sale.repairJobId);
+                    const repairJobDoc = await transaction.get(repairJobRef);
+
+                    if (repairJobDoc.exists()) {
+                        const repairJob = repairJobDoc.data() as RepairJob;
+
+                        // Revert stock for consumed parts
+                        if (repairJob.reservedParts && repairJob.reservedParts.length > 0) {
+                            for (const part of repairJob.reservedParts) {
+                                const productRef = doc(firestore, 'products', part.productId);
+                                const productDoc = await transaction.get(productRef);
+                                if (productDoc.exists()) {
+                                    const productData = productDoc.data() as Product;
+                                    // To revert consumption, we add the quantity back to total stock
+                                    // and also add it back to reserved stock, as the job is now pending again.
+                                    const newStockLevel = (productData.stockLevel || 0) + part.quantity;
+                                    const newReservedStock = (productData.reservedStock || 0) + part.quantity;
+                                    transaction.update(productRef, { 
+                                        stockLevel: newStockLevel,
+                                        reservedStock: newReservedStock 
+                                    });
+                                }
+                            }
+                        }
+                        
+                        // Revert the repair job to a pending, unpaid state.
+                        transaction.update(repairJobRef, {
+                            status: 'Pendiente',
+                            isPaid: false,
+                            amountPaid: 0,
+                        });
+                    } else if (sale.consumedParts && sale.consumedParts.length > 0) {
+                        // NEW LOGIC: Repair job was deleted, but we have the parts list on the sale doc.
+                        for (const part of sale.consumedParts) {
+                            const productRef = doc(firestore, 'products', part.productId);
+                            const productDoc = await transaction.get(productRef);
+                            if (productDoc.exists()) {
+                                const productData = productDoc.data() as Product;
+                                let { stockLevel, damagedStock = 0 } = productData;
+
+                                stockLevel += part.quantity; // Add back to total stock
+                                if (stockAction === 'damage') {
+                                    damagedStock += part.quantity;
+                                }
+                                // No need to update reserved stock, as the repair job is gone.
+                                transaction.update(productRef, { stockLevel, damagedStock });
+                            }
+                        }
+                    }
+                }
+
+                // 1. Update product stock for non-repair items based on user selection
                 for (const item of sale.items) {
-                    if (item.isRepair) continue;
+                    if (item.isRepair) continue; // Repair items were handled above
 
                     const productRef = doc(firestore, 'products', item.productId);
                     const productDoc = await transaction.get(productRef);
@@ -64,7 +117,6 @@ const RefundButton = ({ sale }: { sale: Sale }) => {
                     const productData = productDoc.data() as Product;
 
                     if (productData.isCombo && productData.comboItems) {
-                        // For combo products, return each component to stock
                         for (const comboItem of productData.comboItems) {
                             const componentRef = doc(firestore, 'products', comboItem.productId);
                             const componentDoc = await transaction.get(componentRef);
@@ -145,7 +197,7 @@ const RefundButton = ({ sale }: { sale: Sale }) => {
                     <AlertDialogHeader>
                         <AlertDialogTitle>¿Confirmar Reembolso?</AlertDialogTitle>
                         <AlertDialogDescription>
-                            Esta acción marcará la venta como reembolsada y ajustará el inventario.
+                            Esta acción marcará la venta como reembolsada y ajustará el inventario. Si es una venta de reparación, la reparación volverá al estado 'Pendiente'.
                         </AlertDialogDescription>
                     </AlertDialogHeader>
                     <div className="py-4 space-y-4">
@@ -159,24 +211,26 @@ const RefundButton = ({ sale }: { sale: Sale }) => {
                                 className="mt-2"
                             />
                         </div>
-                        <div>
-                            <Label>Acción de inventario para los productos devueltos</Label>
-                            <RadioGroup 
-                                defaultValue="return" 
-                                className="mt-2 space-y-2"
-                                value={stockAction}
-                                onValueChange={(value: 'return' | 'damage') => setStockAction(value)}
-                            >
-                                <div className="flex items-center space-x-2">
-                                    <RadioGroupItem value="return" id="r1" />
-                                    <Label htmlFor="r1">Devolver a stock disponible (para revender)</Label>
-                                </div>
-                                <div className="flex items-center space-x-2">
-                                    <RadioGroupItem value="damage" id="r2" />
-                                    <Label htmlFor="r2">Devolver a stock dañado (no se puede revender)</Label>
-                                </div>
-                            </RadioGroup>
-                        </div>
+                        {!sale.repairJobId && (
+                             <div>
+                                <Label>Acción de inventario para los productos devueltos</Label>
+                                <RadioGroup 
+                                    defaultValue="return" 
+                                    className="mt-2 space-y-2"
+                                    value={stockAction}
+                                    onValueChange={(value: 'return' | 'damage') => setStockAction(value)}
+                                >
+                                    <div className="flex items-center space-x-2">
+                                        <RadioGroupItem value="return" id="r1" />
+                                        <Label htmlFor="r1">Devolver a stock disponible (para revender)</Label>
+                                    </div>
+                                    <div className="flex items-center space-x-2">
+                                        <RadioGroupItem value="damage" id="r2" />
+                                        <Label htmlFor="r2">Mover a stock dañado (no se puede revender)</Label>
+                                    </div>
+                                </RadioGroup>
+                            </div>
+                        )}
                     </div>
                     <AlertDialogFooter>
                         <AlertDialogCancel onClick={() => setRefundReason("")}>Cancelar</AlertDialogCancel>
@@ -325,14 +379,17 @@ export function TransactionList({ sales, isLoading }: TransactionListProps) {
                             <p className="font-semibold">Pagos:</p>
                             {sale.payments.map((p, i) => <p key={i}>{p.method}{p.reference ? ` (${p.reference})` : ''}: {getPaymentAmountInCorrectCurrency(p)}</p>)}
                             {sale.changeGiven && sale.changeGiven.length > 0 && (
-                                <div className="font-semibold text-primary">
-                                    <p>Vuelto Entregado:</p>
+                                <div className="mt-1 pt-1 border-t">
+                                    <p className="font-semibold">Vuelto Entregado:</p>
                                     {sale.changeGiven.map((change, i) => {
                                         const isUSD = change.method === 'Efectivo USD';
                                         const symbol = getSymbol(isUSD ? 'USD' : 'Bs');
                                         const formattedAmount = formatCurrency(change.amount, isUSD ? 'USD' : 'Bs');
-                                        return <p key={i} className="pl-2">{change.method}: {symbol}{formattedAmount}</p>
+                                        return <p key={i}>{change.method}: {symbol}{formattedAmount}</p>
                                     })}
+                                    {sale.totalChangeInUSD && sale.totalChangeInUSD > 0 && (
+                                        <p className="font-bold text-primary mt-1 pt-1 border-t">Total Vuelto (USD): {getSymbol('USD')}{formatCurrency(sale.totalChangeInUSD, 'USD')}</p>
+                                    )}
                                 </div>
                             )}
                         </div>
@@ -342,5 +399,3 @@ export function TransactionList({ sales, isLoading }: TransactionListProps) {
         </Accordion>
     )
 }
-
-    

@@ -29,6 +29,7 @@ import { useToast } from '@/hooks/use-toast';
 import { AdminAuthDialog } from '@/components/admin-auth-dialog';
 import { PrintLabelsButton } from '@/components/inventory/print-labels-button';
 import { PriceCalculatorDialog } from '@/components/tools/price-calculator-dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 function BulkDeleteButton({ table }: { table: TanstackTable<Product> }) {
     const { firestore } = useFirebase();
@@ -110,6 +111,14 @@ function InventoryContent() {
     const initialFilter: StockFilter = lowStockFilter ? 'low' : 'all';
 
     const [stockFilter, setStockFilter] = useState<StockFilter>(initialFilter);
+    const [categoryFilter, setCategoryFilter] = useState('all');
+
+    const categories = useMemo(() => {
+        if (!products) return [];
+        const uniqueCategories = [...new Set(products.map(p => p.category).filter(Boolean))] as string[];
+        uniqueCategories.sort((a, b) => a.localeCompare(b));
+        return ['all', ...uniqueCategories];
+    }, [products]);
 
     const getAvailableStock = (product: Product, allProducts: Product[]): number => {
         if (product.isCombo) {
@@ -127,11 +136,18 @@ function InventoryContent() {
 
     const filteredProducts = useMemo(() => {
         if (!products) return [];
-        if (stockFilter === 'all') {
-            return products;
+        
+        let tempProducts = products;
+
+        if (categoryFilter !== 'all') {
+            tempProducts = tempProducts.filter(p => p.category === categoryFilter);
         }
 
-        return products.filter(p => {
+        if (stockFilter === 'all') {
+            return tempProducts;
+        }
+
+        return tempProducts.filter(p => {
             const availableStock = getAvailableStock(p, products);
             if (stockFilter === 'low') {
                 return availableStock > 0 && availableStock <= p.lowStockThreshold;
@@ -142,7 +158,7 @@ function InventoryContent() {
             return true;
         });
 
-    }, [products, stockFilter]);
+    }, [products, stockFilter, categoryFilter]);
 
     return (
         <>
@@ -187,6 +203,18 @@ function InventoryContent() {
                 >
                     {(table) => (
                         <div className="flex items-center gap-2">
+                             <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                                <SelectTrigger className="w-[200px]">
+                                    <SelectValue placeholder="Filtrar por categoría" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {categories.map(category => (
+                                        <SelectItem key={category} value={category}>
+                                            {category === 'all' ? 'Todas las categorías' : category}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
                             <PrintLabelsButton table={table} />
                             <BulkDeleteButton table={table} />
                         </div>

@@ -135,7 +135,7 @@ function POSContent() {
 
     const handleProductSelect = (product: Product) => {
         const availableStock = getAvailableStock(product);
-        if(availableStock <= 0) {
+        if(availableStock <= 0 && !product.isCombo) { // Combos might have stock even if their own level is 0
             toast({
                 variant: "destructive",
                 title: "Sin Stock",
@@ -145,22 +145,14 @@ function POSContent() {
         }
 
         setCart(prevCart => {
-            if (prevCart.some(item => item.isRepair)) {
-                toast({
-                    variant: "destructive",
-                    title: "Acción no permitida",
-                    description: "No se pueden añadir otros productos al cobrar una reparación.",
-                });
-                return prevCart;
-            }
-
-            const existingItem = prevCart.find(item => item.productId === product.id);
+            const existingItem = prevCart.find(item => item.productId === product.id && !item.isRepair);
             if (existingItem) {
-                if(existingItem.quantity >= availableStock) {
+                const effectiveStock = product.isCombo ? availableStock : (product.stockLevel - (product.reservedStock || 0) - (product.damagedStock || 0));
+                if(existingItem.quantity >= effectiveStock) {
                     toast({
                         variant: "destructive",
                         title: "Stock Máximo Alcanzado",
-                        description: `No puedes añadir más de ${availableStock} unidades de ${product.name}.`,
+                        description: `No puedes añadir más de ${effectiveStock} unidades de ${product.name}.`,
                     });
                     return prevCart;
                 }
@@ -261,12 +253,12 @@ function POSContent() {
 
     const handleClearCart = () => {
         if (activeRepairJob || cart.some(c => c.isRepair)) {
+            // Keep the repair item, remove everything else
+            setCart(prevCart => prevCart.filter(item => item.isRepair));
             toast({
-                variant: "destructive",
-                title: "Acción no permitida",
-                description: "El cobro de reparación no se puede eliminar. Cancela desde la página de reparaciones si es necesario.",
+                title: "Productos Eliminados",
+                description: "Se han eliminado todos los productos del carrito, manteniendo el cobro de la reparación.",
             });
-            router.push('/dashboard/repairs');
         } else {
             setCart([]);
         }
@@ -295,7 +287,7 @@ function POSContent() {
     }
 
     return (
-        <div className="flex flex-col flex-1 bg-slate-50">
+        <div className="flex-1 flex flex-col bg-slate-50 overflow-hidden">
              <header className="bg-white flex h-14 items-center gap-4 border-b px-4 sm:h-16 sm:px-6 flex-shrink-0">
                 <div className="flex items-center gap-2">
                     <SidebarTrigger />
@@ -317,7 +309,7 @@ function POSContent() {
                 </div>
             </header>
             <main className="flex-1 grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-0 overflow-hidden">
-                <div className="col-span-1 md:col-span-1 lg:col-span-2 bg-white border-r h-full">
+                <div className="col-span-1 md:col-span-1 lg:col-span-2 bg-white border-r h-full flex flex-col">
                     <CartDisplay 
                         cart={cart}
                         allProducts={products || []}

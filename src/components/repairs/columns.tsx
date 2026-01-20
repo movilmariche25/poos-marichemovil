@@ -69,20 +69,31 @@ const ActionsCell = ({ repairJob }: { repairJob: RepairJob }) => {
             await runTransaction(firestore, async (transaction) => {
                 const jobRef = doc(firestore, 'repair_jobs', repairJob.id!);
 
-                // Devolver las piezas reservadas al stock
+                // Return parts to stock differently based on whether the job was paid for.
                 if (repairJob.reservedParts && repairJob.reservedParts.length > 0) {
                     for (const part of repairJob.reservedParts) {
                         const productRef = doc(firestore, 'products', part.productId);
                         const productDoc = await transaction.get(productRef);
+
                         if (productDoc.exists()) {
                             const productData = productDoc.data();
-                            const currentReservedStock = productData.reservedStock || 0;
-                            const newReservedStock = Math.max(0, currentReservedStock - part.quantity);
-                            transaction.update(productRef, { reservedStock: newReservedStock });
+                            
+                            if (repairJob.isPaid) {
+                                // The job was paid, so parts were consumed. 
+                                // Their stockLevel was decremented, and reservedStock was cleared.
+                                // We need to return the part to the total stock count.
+                                const newStockLevel = (productData.stockLevel || 0) + part.quantity;
+                                transaction.update(productRef, { stockLevel: newStockLevel });
+                            } else {
+                                // The job was not paid, parts were only reserved.
+                                // We just need to decrement the reservedStock count.
+                                const newReservedStock = (productData.reservedStock || 0) - part.quantity;
+                                transaction.update(productRef, { reservedStock: Math.max(0, newReservedStock) });
+                            }
                         }
                     }
                 }
-
+                
                 transaction.delete(jobRef);
             });
 

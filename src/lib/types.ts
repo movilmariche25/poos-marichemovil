@@ -87,6 +87,7 @@ export type Sale = {
   id?: string;
   items: (CartItem & { price: number })[]; // Price is stored at checkout time
   repairJobId?: string;
+  consumedParts?: ReservedPart[];
   subtotal: number;
   discount: number;
   totalAmount: number;

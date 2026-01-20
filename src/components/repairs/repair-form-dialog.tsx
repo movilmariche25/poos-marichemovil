@@ -102,6 +102,7 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
   const [customerSearchQuery, setCustomerSearchQuery] = useState("");
   
   const [partsPopoverOpen, setPartsPopoverOpen] = useState(false);
+  const [hasAbono, setHasAbono] = useState(false);
   const [abonoInBs, setAbonoInBs] = useState<number | string>("");
 
 
@@ -271,6 +272,13 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
                 const mainPartProduct = products.find(p => p.id === repairJob.reservedParts[0].productId);
                 setMainPart(mainPartProduct || null);
             }
+            const existingAbono = repairJob.amountPaid || 0;
+            if (existingAbono > 0) {
+                setHasAbono(true);
+                setAbonoInBs(convert(existingAbono, 'USD', 'Bs').toFixed(2));
+            } else {
+                setHasAbono(false);
+            }
         } else {
             form.reset({
                 customerName: "", customerPhone: "", customerID: "", customerAddress: "",
@@ -278,9 +286,10 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
                 initialConditionsChecklist: [], estimatedCost: 0, abono: 0,
                 isPaid: false, status: "Pendiente", notes: "", reservedParts: [],
             });
+            setHasAbono(false);
         }
     }
-  }, [repairJob, form, products, open]);
+  }, [repairJob, form, products, open, convert]);
   
   const onPrint = (job: RepairJob, variant: 'client' | 'internal') => {
     handlePrintTicket({ repairJob: job, variant }, (error) => {
@@ -648,41 +657,67 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
                         )}
                     </div>
                     
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
-                         <FormField control={form.control} name="abono" render={({ field }) => (
-                            <FormItem>
-                                <FormLabel>Abono ({getSymbol()})</FormLabel>
-                                <FormControl>
-                                    <Input 
-                                        type="number" 
-                                        step="0.01" 
-                                        {...field}
-                                        onChange={(e) => {
-                                            const usdValue = parseFloat(e.target.value) || 0;
-                                            field.onChange(usdValue);
-                                            const bsValue = convert(usdValue, 'USD', 'Bs');
-                                            setAbonoInBs(bsValue > 0 ? bsValue.toFixed(2) : "");
-                                        }}
-                                    />
-                                </FormControl>
-                                <FormMessage />
-                            </FormItem>
-                        )}/>
-                        <div>
-                            <Label>Abono (Bs)</Label>
-                             <Input 
-                                type="number" 
-                                step="0.01" 
-                                value={abonoInBs}
-                                onChange={(e) => {
-                                    const bsValue = parseFloat(e.target.value) || 0;
-                                    setAbonoInBs(e.target.value);
-                                    const usdValue = convert(bsValue, 'Bs', 'USD');
-                                    form.setValue('abono', parseFloat(usdValue.toFixed(2)));
-                                }}
-                            />
-                        </div>
+                    <div className="pt-2">
+                        <FormItem className="flex flex-row items-center space-x-2 space-y-0">
+                            <FormControl>
+                                <Checkbox
+                                    id="hasAbono"
+                                    checked={hasAbono}
+                                    onCheckedChange={(checked) => {
+                                        const isChecked = !!checked;
+                                        setHasAbono(isChecked);
+                                        if (!isChecked) {
+                                            form.setValue('abono', 0, { shouldValidate: true });
+                                            setAbonoInBs("");
+                                        }
+                                    }}
+                                    disabled={isReadOnly}
+                                />
+                            </FormControl>
+                            <Label htmlFor="hasAbono" className="font-normal cursor-pointer">
+                                Registrar Abono
+                            </Label>
+                        </FormItem>
                     </div>
+                    
+                    {hasAbono && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end pt-2">
+                            <FormField control={form.control} name="abono" render={({ field }) => (
+                                <FormItem>
+                                    <FormLabel>Abono ({getSymbol()})</FormLabel>
+                                    <FormControl>
+                                        <Input 
+                                            type="number" 
+                                            step="0.01" 
+                                            {...field}
+                                            onChange={(e) => {
+                                                const usdValue = parseFloat(e.target.value) || 0;
+                                                field.onChange(usdValue);
+                                                const bsValue = convert(usdValue, 'USD', 'Bs');
+                                                setAbonoInBs(bsValue > 0 ? bsValue.toFixed(2) : "");
+                                            }}
+                                        />
+                                    </FormControl>
+                                    <FormMessage />
+                                </FormItem>
+                            )}/>
+                            <div>
+                                <Label>Abono (Bs)</Label>
+                                 <Input 
+                                    type="number" 
+                                    step="0.01" 
+                                    value={abonoInBs}
+                                    onChange={(e) => {
+                                        const bsValue = parseFloat(e.target.value) || 0;
+                                        setAbonoInBs(e.target.value);
+                                        const usdValue = convert(bsValue, 'Bs', 'USD');
+                                        form.setValue('abono', parseFloat(usdValue.toFixed(2)));
+                                    }}
+                                />
+                            </div>
+                        </div>
+                    )}
+
 
                      <div className="text-sm text-destructive font-semibold text-right p-2 bg-muted rounded-md flex items-center justify-between">
                         <span>Saldo Pendiente:</span>
