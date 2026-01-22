@@ -1,4 +1,3 @@
-
 "use client";
 
 import { PageHeader } from "@/components/page-header";
@@ -82,7 +81,7 @@ export default function SettingsPage() {
     const handleUpdateBcvRate = async () => {
         setIsFetchingRate(true);
         try {
-            const response = await fetch('https://ve.dolarapi.com/v1/dolares/oficial');
+            const response = await fetch('https://ve.dolarapi.com/v1/dolares/bcv');
             if (!response.ok) {
                 throw new Error(`Error de red: ${response.statusText}`);
             }

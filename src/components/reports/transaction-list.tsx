@@ -49,68 +49,46 @@ const RefundButton = ({ sale }: { sale: Sale }) => {
         
         try {
             await runTransaction(firestore, async (transaction) => {
-                 // If the sale is for a repair, handle the repair and its parts first.
+                // If it was a repair sale, handle the job status
                 if (sale.repairJobId) {
                     const repairJobRef = doc(firestore, 'repair_jobs', sale.repairJobId);
                     const repairJobDoc = await transaction.get(repairJobRef);
-
                     if (repairJobDoc.exists()) {
-                        const repairJob = repairJobDoc.data() as RepairJob;
-
-                        // Revert stock for consumed parts
-                        if (repairJob.reservedParts && repairJob.reservedParts.length > 0) {
-                            for (const part of repairJob.reservedParts) {
-                                const productRef = doc(firestore, 'products', part.productId);
-                                const productDoc = await transaction.get(productRef);
-                                if (productDoc.exists()) {
-                                    const productData = productDoc.data() as Product;
-                                    // To revert consumption, we add the quantity back to total stock
-                                    // and also add it back to reserved stock, as the job is now pending again.
-                                    const newStockLevel = (productData.stockLevel || 0) + part.quantity;
-                                    const newReservedStock = (productData.reservedStock || 0) + part.quantity;
-                                    transaction.update(productRef, { 
-                                        stockLevel: newStockLevel,
-                                        reservedStock: newReservedStock 
-                                    });
-                                }
-                            }
-                        }
-                        
-                        // Revert the repair job to a pending, unpaid state.
                         transaction.update(repairJobRef, {
                             status: 'Pendiente',
                             isPaid: false,
                             amountPaid: 0,
                         });
-                    } else if (sale.consumedParts && sale.consumedParts.length > 0) {
-                        // NEW LOGIC: Repair job was deleted, but we have the parts list on the sale doc.
-                        for (const part of sale.consumedParts) {
-                            const productRef = doc(firestore, 'products', part.productId);
-                            const productDoc = await transaction.get(productRef);
-                            if (productDoc.exists()) {
-                                const productData = productDoc.data() as Product;
-                                let { stockLevel, damagedStock = 0 } = productData;
-
-                                stockLevel += part.quantity; // Add back to total stock
-                                if (stockAction === 'damage') {
-                                    damagedStock += part.quantity;
-                                }
-                                // No need to update reserved stock, as the repair job is gone.
-                                transaction.update(productRef, { stockLevel, damagedStock });
-                            }
-                        }
                     }
                 }
 
-                // 1. Update product stock for non-repair items based on user selection
+                // Handle inventory for ALL items being returned in the sale
                 for (const item of sale.items) {
-                    if (item.isRepair) continue; // Repair items were handled above
+                    // For a repair item, the actual parts are in 'consumedParts'
+                    if (item.isRepair) {
+                        if (sale.consumedParts && sale.consumedParts.length > 0) {
+                            for (const part of sale.consumedParts) {
+                                const productRef = doc(firestore, 'products', part.productId);
+                                const productDoc = await transaction.get(productRef);
+                                if (productDoc.exists()) {
+                                    let { stockLevel, damagedStock = 0 } = productDoc.data() as Product;
+                                    stockLevel += part.quantity;
+                                    if (stockAction === 'damage') {
+                                        damagedStock += part.quantity;
+                                    }
+                                    transaction.update(productRef, { stockLevel, damagedStock });
+                                }
+                            }
+                        }
+                        continue; // Move to the next item in the sale
+                    }
 
+                    // For regular items (simple products or combos)
                     const productRef = doc(firestore, 'products', item.productId);
                     const productDoc = await transaction.get(productRef);
                     
                     if (!productDoc.exists()) {
-                        console.warn(`Product with ID ${item.productId} not found during refund. Skipping stock update.`);
+                        console.warn(`Product with ID ${item.productId} not found. Skipping stock update.`);
                         continue;
                     }
                     
@@ -134,7 +112,6 @@ const RefundButton = ({ sale }: { sale: Sale }) => {
                     } else {
                         // For simple products
                         let { stockLevel, damagedStock = 0 } = productData;
-                        
                         stockLevel += item.quantity;
                         if (stockAction === 'damage') {
                             damagedStock += item.quantity;
@@ -143,7 +120,7 @@ const RefundButton = ({ sale }: { sale: Sale }) => {
                     }
                 }
 
-                // 2. Mark sale as refunded with reason
+                // Finally, mark the sale as refunded
                 const saleRef = doc(firestore, 'sale_transactions', sale.id!);
                 transaction.update(saleRef, {
                     status: 'refunded',
@@ -211,26 +188,24 @@ const RefundButton = ({ sale }: { sale: Sale }) => {
                                 className="mt-2"
                             />
                         </div>
-                        {!sale.repairJobId && (
-                             <div>
-                                <Label>Acción de inventario para los productos devueltos</Label>
-                                <RadioGroup 
-                                    defaultValue="return" 
-                                    className="mt-2 space-y-2"
-                                    value={stockAction}
-                                    onValueChange={(value: 'return' | 'damage') => setStockAction(value)}
-                                >
-                                    <div className="flex items-center space-x-2">
-                                        <RadioGroupItem value="return" id="r1" />
-                                        <Label htmlFor="r1">Devolver a stock disponible (para revender)</Label>
-                                    </div>
-                                    <div className="flex items-center space-x-2">
-                                        <RadioGroupItem value="damage" id="r2" />
-                                        <Label htmlFor="r2">Mover a stock dañado (no se puede revender)</Label>
-                                    </div>
-                                </RadioGroup>
-                            </div>
-                        )}
+                        <div>
+                            <Label>Acción de inventario para los productos devueltos</Label>
+                            <RadioGroup 
+                                defaultValue="return" 
+                                className="mt-2 space-y-2"
+                                value={stockAction}
+                                onValueChange={(value: 'return' | 'damage') => setStockAction(value)}
+                            >
+                                <div className="flex items-center space-x-2">
+                                    <RadioGroupItem value="return" id="r1" />
+                                    <Label htmlFor="r1">Devolver a stock disponible (para revender)</Label>
+                                </div>
+                                <div className="flex items-center space-x-2">
+                                    <RadioGroupItem value="damage" id="r2" />
+                                    <Label htmlFor="r2">Mover a stock dañado (no se puede revender)</Label>
+                                </div>
+                            </RadioGroup>
+                        </div>
                     </div>
                     <AlertDialogFooter>
                         <AlertDialogCancel onClick={() => setRefundReason("")}>Cancelar</AlertDialogCancel>

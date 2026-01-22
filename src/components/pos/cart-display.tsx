@@ -12,8 +12,8 @@ import { useCurrency } from "@/hooks/use-currency";
 import { useRouter } from "next/navigation";
 import { ScrollArea } from "../ui/scroll-area";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
-import { useFirebase } from "@/firebase";
-import { collection, doc, getDoc, writeBatch, runTransaction } from "firebase/firestore";
+import { useFirebase, useDoc, useMemoFirebase } from "@/firebase";
+import { collection, doc, writeBatch, runTransaction } from "firebase/firestore";
 import { useToast } from "@/hooks/use-toast";
 import { format } from 'date-fns';
 import { cn } from "@/lib/utils";
@@ -42,26 +42,12 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
   const router = useRouter();
   const { format: formatCurrency, convert, getDynamicPrice, getSymbol } = useCurrency();
   const [discount, setDiscount] = useState(0);
-  const [activeRepairJob, setActiveRepairJob] = useState<RepairJob | null>(null);
-
-   useEffect(() => {
-    const fetchRepairJob = async () => {
-        if (repairJobId && firestore) {
-            try {
-                 const repairJobRef = doc(firestore, 'repair_jobs', repairJobId);
-                 const repairJobDoc = await getDoc(repairJobRef);
-                 if (repairJobDoc.exists()) {
-                    setActiveRepairJob(repairJobDoc.data() as RepairJob);
-                 }
-            } catch (e) {
-              console.error("Failed to fetch repair job for CartDisplay", e);
-              setActiveRepairJob(null);
-            }
-        }
-    };
-    fetchRepairJob();
-  }, [repairJobId, firestore]);
-
+  
+  const repairJobRef = useMemoFirebase(() => 
+    (repairJobId && firestore) ? doc(firestore, 'repair_jobs', repairJobId) : null,
+    [repairJobId, firestore]
+  );
+  const { data: activeRepairJob } = useDoc<RepairJob>(repairJobRef);
 
   const getPrice = (item: CartItem) => {
     if (item.isGift) return 0;

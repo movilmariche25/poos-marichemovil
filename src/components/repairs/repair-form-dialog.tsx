@@ -24,7 +24,7 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import type { RepairJob, RepairStatus, Product } from "@/lib/types";
+import type { RepairJob, RepairStatus, Product, PaymentMethod } from "@/lib/types";
 import { useState, useEffect, useMemo, ReactNode } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { Textarea } from "../ui/textarea";
@@ -35,7 +35,7 @@ import { Label } from "../ui/label";
 import { useFirebase, setDocumentNonBlocking, addDocumentNonBlocking, useCollection, useMemoFirebase } from "@/firebase";
 import { collection, doc, writeBatch, query, where, getDocs, getDoc, runTransaction } from "firebase/firestore";
 import { handlePrintTicket } from "./repair-ticket";
-import { AlertCircle, Info, Printer, Search, TicketPercent, UserSearch } from "lucide-react";
+import { AlertCircle, Banknote, CreditCard, DollarSign, Info, Landmark, Printer, Search, Smartphone, TicketPercent, UserSearch } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "../ui/command";
 import { format, addDays } from "date-fns";
@@ -53,6 +53,14 @@ const initialChecklistItems = [
     { id: 'back_scratched', label: 'Carcasa/Tapa Trasera Rayada' },
     { id: 'no_power', label: 'Equipo No Enciende' },
     { id: 'wet_damage', label: 'Equipo Mojado' },
+];
+
+const paymentMethodOptions: { value: PaymentMethod, label: string, icon: ReactNode, hasReference: boolean, isBs: boolean }[] = [
+    { value: 'Efectivo USD', label: 'Efectivo USD', icon: <DollarSign className="w-5 h-5"/>, hasReference: false, isBs: false },
+    { value: 'Efectivo Bs', label: 'Efectivo Bs', icon: <Landmark className="w-5 h_5"/>, hasReference: false, isBs: true },
+    { value: 'Tarjeta', label: 'Tarjeta', icon: <CreditCard className="w-5 h-5"/>, hasReference: true, isBs: true },
+    { value: 'Pago Móvil', label: 'Pago Móvil', icon: <Smartphone className="w-5 h-5"/>, hasReference: true, isBs: true },
+    { value: 'Transferencia', label: 'Transferencia', icon: <Banknote className="w-5 h-5"/>, hasReference: true, isBs: true },
 ];
 
 const reservedPartSchema = z.object({
@@ -73,11 +81,15 @@ const formSchema = z.object({
   reportedIssue: z.string().min(5, "La descripción del problema es obligatoria."),
   initialConditionsChecklist: z.array(z.string()).optional(),
   estimatedCost: z.coerce.number().min(0),
-  abono: z.coerce.number().min(0).optional(),
   isPaid: z.boolean(),
   status: z.enum(repairStatuses),
   notes: z.string().optional(),
   reservedParts: z.array(reservedPartSchema).optional(),
+  // New fields for abono
+  hasNewAbono: z.boolean().optional(),
+  newAbonoAmount: z.coerce.number().optional(),
+  newAbonoPaymentMethod: z.custom<PaymentMethod>().optional(),
+  newAbonoReference: z.string().optional(),
 });
 
 type RepairFormData = z.infer<typeof formSchema>;
@@ -94,6 +106,13 @@ function generateJobId() {
     return `R-${datePart}-${randomPart}`;
 }
 
+function generateSaleId() {
+    const date = new Date();
+    const datePart = format(date, "yyMMdd");
+    const randomPart = Math.floor(1000 + Math.random() * 9000).toString();
+    return `S-${datePart}-${randomPart}`;
+}
+
 export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps) {
   const { firestore } = useFirebase();
   const [open, setOpen] = useState(false);
@@ -102,10 +121,7 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
   const [customerSearchQuery, setCustomerSearchQuery] = useState("");
   
   const [partsPopoverOpen, setPartsPopoverOpen] = useState(false);
-  const [hasAbono, setHasAbono] = useState(false);
-  const [abonoInBs, setAbonoInBs] = useState<number | string>("");
-
-
+  
   const { toast } = useToast();
   const { getSymbol, format: formatCurrency, getDynamicPrice, convert } = useCurrency();
   const [warrantyInfo, setWarrantyInfo] = useState<{ message: string; date: string } | null>(null);
@@ -128,14 +144,21 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
     defaultValues: {
       customerName: "", customerPhone: "", customerID: "", customerAddress: "",
       deviceMake: "", deviceModel: "", deviceImei: "", reportedIssue: "",
-      initialConditionsChecklist: [], estimatedCost: 0, abono: 0,
+      initialConditionsChecklist: [], estimatedCost: 0,
       isPaid: false, status: "Pendiente", notes: "", reservedParts: [],
+      hasNewAbono: false, newAbonoAmount: 0, newAbonoReference: "",
     },
   });
 
   const customerIdValue = form.watch('customerID');
   const customerNameValue = form.watch('customerName');
   const [debouncedCustomerId] = useDebounce(customerIdValue, 500);
+
+  // New watchers for abono UI improvement
+  const newAbonoAmountValue = form.watch('newAbonoAmount');
+  const newAbonoPaymentMethodValue = form.watch('newAbonoPaymentMethod');
+  const isBsAbono = newAbonoPaymentMethodValue && paymentMethodOptions.find(o => o.value === newAbonoPaymentMethodValue)?.isBs;
+
 
   useEffect(() => {
     const checkDuplicateId = async () => {
@@ -250,7 +273,6 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
         setWarrantyInfo(null);
         setMainPart(null);
         setUsePromoPrice(false);
-        setAbonoInBs("");
         setCustomerSearchQuery("");
         setIsCustomerSearchOpen(false);
         setDuplicateIdError(null);
@@ -264,32 +286,27 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
                 initialConditionsChecklist: repairJob.initialConditionsChecklist || [],
                 notes: repairJob.notes ?? "",
                 estimatedCost: repairJob.estimatedCost || 0,
-                abono: repairJob.amountPaid || 0, // Map amountPaid to abono
                 isPaid: repairJob.isPaid || false,
                 reservedParts: repairJob.reservedParts || [],
+                hasNewAbono: false,
+                newAbonoAmount: 0,
+                newAbonoReference: "",
             });
             if (repairJob.reservedParts && repairJob.reservedParts.length > 0 && products) {
                 const mainPartProduct = products.find(p => p.id === repairJob.reservedParts[0].productId);
                 setMainPart(mainPartProduct || null);
             }
-            const existingAbono = repairJob.amountPaid || 0;
-            if (existingAbono > 0) {
-                setHasAbono(true);
-                setAbonoInBs(convert(existingAbono, 'USD', 'Bs').toFixed(2));
-            } else {
-                setHasAbono(false);
-            }
         } else {
             form.reset({
                 customerName: "", customerPhone: "", customerID: "", customerAddress: "",
                 deviceMake: "", deviceModel: "", deviceImei: "", reportedIssue: "",
-                initialConditionsChecklist: [], estimatedCost: 0, abono: 0,
+                initialConditionsChecklist: [], estimatedCost: 0,
                 isPaid: false, status: "Pendiente", notes: "", reservedParts: [],
+                hasNewAbono: false, newAbonoAmount: 0, newAbonoReference: "",
             });
-            setHasAbono(false);
         }
     }
-  }, [repairJob, form, products, open, convert]);
+  }, [repairJob, form, products, open]);
   
   const onPrint = (job: RepairJob, variant: 'client' | 'internal') => {
     handlePrintTicket({ repairJob: job, variant }, (error) => {
@@ -327,11 +344,24 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
     }
 
     try {
-        await runTransaction(firestore, async (transaction) => {
-            const oldParts = repairJob?.reservedParts || [];
-            const newParts = values.reservedParts || [];
+        const newJobDataForPrint = await runTransaction(firestore, async (transaction) => {
+            const jobId = repairJob?.id || generateJobId();
+            const jobRef = doc(firestore, 'repair_jobs', jobId);
 
-            // Un-reserve old parts that are no longer in the new list
+            // Get current job data to safely update amountPaid
+            let currentAmountPaid = 0;
+            let existingJobData: RepairJob | null = null;
+            if (repairJob) {
+                const jobDoc = await transaction.get(jobRef);
+                if (jobDoc.exists()) {
+                    existingJobData = jobDoc.data() as RepairJob;
+                    currentAmountPaid = existingJobData.amountPaid || 0;
+                }
+            }
+
+            // Handle part reservations
+            const oldParts = existingJobData?.reservedParts || [];
+            const newParts = values.reservedParts || [];
             for (const oldPart of oldParts) {
                 if (!newParts.some(p => p.productId === oldPart.productId)) {
                     const productRef = doc(firestore, "products", oldPart.productId);
@@ -342,68 +372,91 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
                     }
                 }
             }
-            
-            // Reserve new parts
             for (const newPart of newParts) {
-                // Only reserve if it's a new part for this job
                 if (!oldParts.some(p => p.productId === newPart.productId)) {
                     const productRef = doc(firestore, "products", newPart.productId);
                     const productDoc = await transaction.get(productRef);
-                    if (!productDoc.exists()) throw new Error(`La pieza ${newPart.productName} no se encuentra en el inventario.`);
-
+                    if (!productDoc.exists()) throw new Error(`La pieza ${newPart.productName} no se encuentra.`);
                     const productData = productDoc.data();
                     const availableStock = productData.stockLevel - (productData.reservedStock || 0);
-
-                    if (availableStock < newPart.quantity) {
-                        throw new Error(`Stock insuficiente para "${newPart.productName}". Disponible: ${availableStock}.`);
-                    }
+                    if (availableStock < newPart.quantity) throw new Error(`Stock insuficiente para "${newPart.productName}".`);
                     const currentReserved = productData.reservedStock || 0;
                     transaction.update(productRef, { reservedStock: currentReserved + newPart.quantity });
                 }
             }
 
-            const wasCompleted = repairJob?.status === 'Completado';
+            // Handle new abono
+            let newAbonoAmountUSD = 0;
+            if (values.hasNewAbono && values.newAbonoAmount && values.newAbonoAmount > 0 && values.newAbonoPaymentMethod) {
+                const saleId = generateSaleId();
+                const saleRef = doc(firestore, 'sale_transactions', saleId);
+                const abonoAmount = values.newAbonoAmount;
+                const abonoMethod = values.newAbonoPaymentMethod;
+                const abonoReference = values.newAbonoReference;
+                const option = paymentMethodOptions.find(o => o.value === abonoMethod)!;
+                
+                newAbonoAmountUSD = option.isBs ? convert(abonoAmount, 'Bs', 'USD') : abonoAmount;
+
+                const newSaleData = {
+                    id: saleId,
+                    repairJobId: jobId,
+                    items: [{
+                        productId: `abono-${jobId}`,
+                        name: `Abono para Reparación ${values.deviceMake} ${values.deviceModel}`,
+                        quantity: 1,
+                        price: newAbonoAmountUSD,
+                        isRepair: true,
+                    }],
+                    subtotal: newAbonoAmountUSD,
+                    discount: 0,
+                    totalAmount: newAbonoAmountUSD,
+                    payments: [{ method: abonoMethod, amount: abonoAmount, reference: abonoReference }],
+                    paymentMethod: abonoMethod,
+                    transactionDate: new Date().toISOString(),
+                    status: 'completed' as 'completed' | 'refunded'
+                };
+                transaction.set(saleRef, newSaleData);
+            }
+
+            // Prepare final RepairJob data
+            const wasCompleted = existingJobData?.status === 'Completado';
             const isNowCompleted = values.status === 'Completado';
             let completionData: Partial<RepairJob> = {};
-
             if (isNowCompleted && !wasCompleted) {
                 const completionDate = new Date();
-                completionData = {
-                    completedAt: completionDate.toISOString(),
-                    warrantyEndDate: addDays(completionDate, 4).toISOString()
-                };
+                completionData = { completedAt: completionDate.toISOString(), warrantyEndDate: addDays(completionDate, 4).toISOString() };
             }
-            
-            const amountPaid = values.abono || 0;
-            const isPaid = amountPaid >= values.estimatedCost && values.estimatedCost > 0;
-            const finalValues = { ...values, amountPaid, isPaid, notes: values.notes || "" };
 
-            if (repairJob) {
-                const jobRef = doc(firestore, 'repair_jobs', repairJob.id!);
-                transaction.set(jobRef, { ...finalValues, ...completionData }, { merge: true });
+            const newTotalAmountPaid = currentAmountPaid + newAbonoAmountUSD;
+            const isPaid = newTotalAmountPaid >= values.estimatedCost && values.estimatedCost > 0;
+            const { hasNewAbono, newAbonoAmount, newAbonoPaymentMethod, newAbonoReference, ...jobValues } = values;
+            
+            const finalJobData: Partial<RepairJob> = {
+                ...jobValues,
+                amountPaid: newTotalAmountPaid,
+                isPaid,
+                notes: values.notes || "",
+                ...completionData
+            };
+            
+            // Set or merge data
+            if (existingJobData) {
+                transaction.set(jobRef, finalJobData, { merge: true });
             } else {
-                const jobId = generateJobId();
-                const newJobData = { ...finalValues, id: jobId, createdAt: new Date().toISOString(), ...completionData };
-                const jobRef = doc(firestore, 'repair_jobs', jobId);
-                transaction.set(jobRef, newJobData);
-                
-                // Return new job data for printing
-                return newJobData;
+                const newJobPayload = { ...finalJobData, id: jobId, createdAt: new Date().toISOString() };
+                transaction.set(jobRef, newJobPayload);
+                return newJobPayload; // Return for printing
             }
-        }).then((newJobData) => {
-            if (newJobData) { // This means it was a new job
-                const fullJobData: RepairJob = {
-                    ...newJobData,
-                    partsCost: 0, 
-                    laborCost: 0,
-                };
-                onPrint(fullJobData, 'client');
-                toast({ title: "Trabajo de Reparación Creado", description: `Nuevo trabajo para ${values.customerName} ha sido registrado.` });
-            } else { // This means it was an update
-                toast({ title: "Trabajo de Reparación Actualizado", description: `El trabajo para ${values.customerName} ha sido actualizado.` });
-            }
-            setOpen(false);
         });
+        
+        if (newJobDataForPrint) {
+            toast({ title: "Trabajo de Reparación Creado", description: `Nuevo trabajo para ${values.customerName} ha sido registrado.` });
+            onPrint(newJobDataForPrint as RepairJob, 'client');
+        } else {
+            toast({ title: "Trabajo de Reparación Actualizado", description: `El trabajo para ${values.customerName} ha sido actualizado.` });
+        }
+        setOpen(false);
+
     } catch (error: any) {
         console.error("Error al guardar la reparación:", error);
         toast({
@@ -415,7 +468,8 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
   }
   
   const estimatedCost = form.watch('estimatedCost');
-  const abono = form.watch('abono') || 0;
+  const amountAlreadyPaid = repairJob?.amountPaid || 0;
+  const hasNewAbono = form.watch('hasNewAbono');
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -594,7 +648,7 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
                 </fieldset>
                 
                 <fieldset className="space-y-4" disabled={isReadOnly}>
-                    <legend className="text-lg font-semibold mb-4 col-span-2">Costos y Estado</legend>
+                    <legend className="text-lg font-semibold mb-4 col-span-2">Costos y Pagos</legend>
                     <div>
                         <Label>Pieza Principal de la Reparación</Label>
                         <Popover open={partsPopoverOpen} onOpenChange={setPartsPopoverOpen}>
@@ -657,72 +711,96 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
                         )}
                     </div>
                     
-                    <div className="pt-2">
-                        <FormItem className="flex flex-row items-center space-x-2 space-y-0">
-                            <FormControl>
-                                <Checkbox
-                                    id="hasAbono"
-                                    checked={hasAbono}
-                                    onCheckedChange={(checked) => {
-                                        const isChecked = !!checked;
-                                        setHasAbono(isChecked);
-                                        if (!isChecked) {
-                                            form.setValue('abono', 0, { shouldValidate: true });
-                                            setAbonoInBs("");
-                                        }
-                                    }}
-                                    disabled={isReadOnly}
-                                />
-                            </FormControl>
-                            <Label htmlFor="hasAbono" className="font-normal cursor-pointer">
-                                Registrar Abono
-                            </Label>
-                        </FormItem>
+                    <div className="p-3 bg-muted rounded-md space-y-2">
+                        <div className="flex justify-between text-sm font-medium">
+                            <span>Monto ya Pagado:</span>
+                            <span>{getSymbol()}{formatCurrency(amountAlreadyPaid)}</span>
+                        </div>
+                        <div className="flex justify-between text-base font-bold text-destructive">
+                            <span>Saldo Pendiente:</span>
+                            <span>{getSymbol()}{formatCurrency(Math.max(0, estimatedCost - amountAlreadyPaid))}</span>
+                        </div>
                     </div>
                     
-                    {hasAbono && (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end pt-2">
-                            <FormField control={form.control} name="abono" render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>Abono ({getSymbol()})</FormLabel>
-                                    <FormControl>
-                                        <Input 
-                                            type="number" 
-                                            step="0.01" 
-                                            {...field}
-                                            onChange={(e) => {
-                                                const usdValue = parseFloat(e.target.value) || 0;
-                                                field.onChange(usdValue);
-                                                const bsValue = convert(usdValue, 'USD', 'Bs');
-                                                setAbonoInBs(bsValue > 0 ? bsValue.toFixed(2) : "");
-                                            }}
-                                        />
-                                    </FormControl>
-                                    <FormMessage />
-                                </FormItem>
-                            )}/>
-                            <div>
-                                <Label>Abono (Bs)</Label>
-                                 <Input 
-                                    type="number" 
-                                    step="0.01" 
-                                    value={abonoInBs}
-                                    onChange={(e) => {
-                                        const bsValue = parseFloat(e.target.value) || 0;
-                                        setAbonoInBs(e.target.value);
-                                        const usdValue = convert(bsValue, 'Bs', 'USD');
-                                        form.setValue('abono', parseFloat(usdValue.toFixed(2)));
-                                    }}
+                    <FormField
+                        control={form.control}
+                        name="hasNewAbono"
+                        render={({ field }) => (
+                            <FormItem className="flex flex-row items-center space-x-2 space-y-0 pt-2">
+                                <FormControl>
+                                    <Checkbox
+                                        checked={field.value}
+                                        onCheckedChange={field.onChange}
+                                        disabled={isReadOnly}
+                                    />
+                                </FormControl>
+                                <Label className="font-normal cursor-pointer">
+                                    Registrar Nuevo Abono
+                                </Label>
+                            </FormItem>
+                        )}
+                    />
+
+                    {hasNewAbono && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center p-4 border rounded-lg">
+                           <FormField
+                                control={form.control}
+                                name="newAbonoPaymentMethod"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>Método de Pago</FormLabel>
+                                        <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                            <FormControl>
+                                                <SelectTrigger>
+                                                    <SelectValue placeholder="Seleccione un método..." />
+                                                </SelectTrigger>
+                                            </FormControl>
+                                            <SelectContent>
+                                                {paymentMethodOptions.map(opt => (
+                                                    <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                             <FormField
+                                control={form.control}
+                                name="newAbonoAmount"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>Monto del Abono</FormLabel>
+                                        <FormControl>
+                                            <Input type="number" step="0.01" {...field} />
+                                        </FormControl>
+                                         {isBsAbono && newAbonoAmountValue && newAbonoAmountValue > 0 && (
+                                            <FormDescription>
+                                                Equivale a ~{getSymbol()}{formatCurrency(convert(newAbonoAmountValue, 'Bs', 'USD'))}
+                                            </FormDescription>
+                                        )}
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                            {paymentMethodOptions.find(opt => opt.value === form.watch('newAbonoPaymentMethod'))?.hasReference && (
+                                 <FormField
+                                    control={form.control}
+                                    name="newAbonoReference"
+                                    render={({ field }) => (
+                                        <FormItem className="md:col-span-2">
+                                            <FormLabel>Referencia</FormLabel>
+                                            <FormControl>
+                                                <Input placeholder="Nro. de referencia o lote" {...field} />
+                                            </FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
                                 />
-                            </div>
+                            )}
                         </div>
                     )}
-
-
-                     <div className="text-sm text-destructive font-semibold text-right p-2 bg-muted rounded-md flex items-center justify-between">
-                        <span>Saldo Pendiente:</span>
-                        <span>{getSymbol()}{Math.max(0, estimatedCost - abono).toFixed(2)}</span>
-                    </div>
+                    
 
                     <FormField control={form.control} name="status" render={({ field }) => (
                         <FormItem><FormLabel>Estado</FormLabel>
@@ -757,3 +835,5 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
     </Dialog>
   );
 }
+
+    

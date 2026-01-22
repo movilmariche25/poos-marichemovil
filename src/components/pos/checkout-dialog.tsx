@@ -15,6 +15,7 @@ import { Label } from "../ui/label";
 import { ScrollArea } from "../ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
+import { Checkbox } from "../ui/checkbox";
 
 type CheckoutDialogProps = {
   cart: CartItem[];
@@ -49,12 +50,14 @@ export function CheckoutDialog({ cart, allProducts, total, children, onCheckout,
   const { format: formatCurrency, getSymbol, convert, isLoading: currencyLoading } = useCurrency();
   const [payments, setPayments] = useState<TempPayment[]>([]);
   const [changePayments, setChangePayments] = useState<TempPayment[]>([]);
+  const [isGivingChange, setIsGivingChange] = useState(false);
   const router = useRouter();
   
   useEffect(() => {
     if (open && !completedSale) {
       setPayments([]);
       setChangePayments([]);
+      setIsGivingChange(false);
     }
   }, [open, completedSale]);
 
@@ -69,8 +72,6 @@ export function CheckoutDialog({ cart, allProducts, total, children, onCheckout,
     }, 0);
   }, [payments, convert, currencyLoading]);
 
-  const totalChangeInUSD = useMemo(() => (totalPaid > total ? totalPaid - total : 0), [totalPaid, total]);
-
   const totalGivenInUSD = useMemo(() => {
       if (currencyLoading) return 0;
       return changePayments.reduce((acc, payment) => {
@@ -81,10 +82,26 @@ export function CheckoutDialog({ cart, allProducts, total, children, onCheckout,
       }, 0);
   }, [changePayments, convert, currencyLoading]);
 
-  const changeDifference = useMemo(() => totalChangeInUSD - totalGivenInUSD, [totalChangeInUSD, totalGivenInUSD]);
+  const potentialChangeInUSD = useMemo(() => (totalPaid > total ? totalPaid - total : 0), [totalPaid, total]);
+  const requiredChangeInUSD = isGivingChange ? potentialChangeInUSD : 0;
+  const changeDifference = useMemo(() => requiredChangeInUSD - totalGivenInUSD, [requiredChangeInUSD, totalGivenInUSD]);
   
-  const canConfirm = totalPaid >= total && total > 0 && (changePayments.length === 0 || Math.abs(changeDifference) < 0.01);
+  const canConfirm = useMemo(() => {
+    if (total <= 0 || payments.length === 0 || currencyLoading) return false;
 
+    if (isGivingChange) {
+      return totalPaid > total && Math.abs(changeDifference) < 0.01;
+    } else {
+      return totalPaid > 0;
+    }
+  }, [total, totalPaid, payments, isGivingChange, changeDifference, currencyLoading]);
+
+  useEffect(() => {
+    if (potentialChangeInUSD <= 0.001) {
+      setIsGivingChange(false);
+      setChangePayments([]);
+    }
+  }, [potentialChangeInUSD]);
 
   const handleAddPayment = (method: PaymentMethod) => {
     setPayments(prev => [...prev, { id: Date.now(), method, amount: 0, reference: '' }]);
@@ -110,10 +127,13 @@ export function CheckoutDialog({ cart, allProducts, total, children, onCheckout,
   const handleConfirm = async () => {
     if (!canConfirm) return;
     
+    const finalChangeGiven = isGivingChange ? changePayments.map(({ id, ...rest }) => rest) : [];
+    const finalTotalChangeUSD = isGivingChange ? potentialChangeInUSD : 0;
+    
     const sale = await onCheckout(
         payments.map(({ id, ...rest }) => rest),
-        changePayments.map(({ id, ...rest }) => rest),
-        totalChangeInUSD
+        finalChangeGiven,
+        finalTotalChangeUSD
     );
     
     if(sale) {
@@ -244,89 +264,125 @@ export function CheckoutDialog({ cart, allProducts, total, children, onCheckout,
                         </div>
                     </ScrollArea>
                 )}
+
                  <div className="text-center p-3 rounded-lg bg-secondary text-secondary-foreground">
-                    <p className="text-sm">Monto Restante</p>
-                    <div className={cn("font-bold", totalPaid < total ? 'text-destructive' : 'text-green-600')}>
-                        <p className="text-2xl">{getSymbol('USD')}{formatCurrency(Math.max(0, total - totalPaid), 'USD')}</p>
-                        <p className="text-xs text-secondary-foreground/80">
-                            o Bs {formatCurrency(convert(Math.max(0, total - totalPaid), 'USD', 'Bs'), 'Bs')}
-                        </p>
-                    </div>
+                    {totalPaid >= total ? (
+                        <>
+                        <p className="text-sm">Vuelto</p>
+                        <div className="font-bold text-green-600">
+                            <p className="text-2xl">{getSymbol('USD')}{formatCurrency(potentialChangeInUSD, 'USD')}</p>
+                            <p className="text-xs text-secondary-foreground/80">
+                            o Bs {formatCurrency(convert(potentialChangeInUSD, 'USD', 'Bs'), 'Bs')}
+                            </p>
+                        </div>
+                        </>
+                    ) : (
+                        <>
+                        <p className="text-sm">Monto Restante</p>
+                        <div className="font-bold text-destructive">
+                            <p className="text-2xl">{getSymbol('USD')}{formatCurrency(total - totalPaid, 'USD')}</p>
+                            <p className="text-xs text-secondary-foreground/80">
+                            o Bs {formatCurrency(convert(total - totalPaid, 'USD', 'Bs'), 'Bs')}
+                            </p>
+                        </div>
+                        </>
+                    )}
                  </div>
 
-                 {totalChangeInUSD > 0.001 && (
+                 {potentialChangeInUSD > 0.001 && (
                     <div className="space-y-4 pt-4 border-t">
-                        <div className="text-center p-2 rounded-lg bg-primary/10">
-                            <p className="text-sm text-primary">Vuelto Total Requerido</p>
-                            <p className="text-2xl font-bold text-primary">{getSymbol('USD')}{formatCurrency(totalChangeInUSD, 'USD')}</p>
-                            <p className="text-sm text-primary/80">o Bs {formatCurrency(convert(totalChangeInUSD, 'USD', 'Bs'), 'Bs')}</p>
+                        <div className="flex items-center space-x-2">
+                            <Checkbox
+                                id="give-change-checkbox"
+                                checked={isGivingChange}
+                                onCheckedChange={(checked) => {
+                                const isChecked = !!checked;
+                                setIsGivingChange(isChecked);
+                                if (!isChecked) {
+                                    setChangePayments([]);
+                                }
+                                }}
+                            />
+                            <Label htmlFor="give-change-checkbox" className="cursor-pointer font-medium">
+                                Registrar Vuelto Entregado
+                            </Label>
                         </div>
 
-                        <div className="space-y-2">
-                          <p className="font-medium">Añadir Vuelto</p>
-                          <div className="flex flex-wrap gap-2">
-                              {changeMethodOptions.map(method => (
-                                <Button key={method.value} variant="outline" size="sm" onClick={() => handleAddChangePayment(method.value)}>
-                                      {method.icon} {method.label}
-                                </Button>
-                              ))}
-                          </div>
-                        </div>
+                        {isGivingChange && (
+                        <>
+                            <div className="text-center p-2 rounded-lg bg-primary/10">
+                                <p className="text-sm text-primary">Vuelto Total Requerido</p>
+                                <p className="text-2xl font-bold text-primary">{getSymbol('USD')}{formatCurrency(requiredChangeInUSD, 'USD')}</p>
+                                <p className="text-sm text-primary/80">o Bs {formatCurrency(convert(requiredChangeInUSD, 'USD', 'Bs'), 'Bs')}</p>
+                            </div>
 
-                         {changePayments.length > 0 && (
-                            <ScrollArea className="h-[150px] p-1">
-                                <div className="space-y-3">
-                                    {changePayments.map(p => {
-                                        const option = changeMethodOptions.find(o => o.value === p.method)!;
-                                        const symbol = option.isBs ? getSymbol('Bs') : getSymbol('USD');
-                                        return (
-                                        <div key={p.id} className="p-3 border rounded-lg bg-background flex flex-col gap-2">
-                                            <div className="flex justify-between items-center">
-                                                <Label className="flex items-center gap-2">{option.icon} {option.label}</Label>
-                                                <Button variant="ghost" size="icon" className="w-6 h-6" onClick={() => handleRemoveChangePayment(p.id)}>
-                                                    <Trash2 className="w-4 h-4 text-destructive" />
-                                                </Button>
-                                            </div>
-                                            <div className="flex gap-2">
-                                                <div className="relative flex-1">
-                                                    <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-                                                        <span className="text-gray-500 sm:text-sm">{symbol}</span>
-                                                    </div>
-                                                    <Input
-                                                        type="number"
-                                                        value={p.amount || ''}
-                                                        onChange={(e) => handleUpdateChangePayment(p.id, 'amount', parseFloat(e.target.value) || 0)}
-                                                        placeholder="0,00"
-                                                        className="pl-7"
-                                                    />
+                            <div className="space-y-2">
+                            <p className="font-medium">Añadir Vuelto</p>
+                            <div className="flex flex-wrap gap-2">
+                                {changeMethodOptions.map(method => (
+                                    <Button key={method.value} variant="outline" size="sm" onClick={() => handleAddChangePayment(method.value)}>
+                                        {method.icon} {method.label}
+                                    </Button>
+                                ))}
+                            </div>
+                            </div>
+
+                            {changePayments.length > 0 && (
+                                <ScrollArea className="h-[150px] p-1">
+                                    <div className="space-y-3">
+                                        {changePayments.map(p => {
+                                            const option = changeMethodOptions.find(o => o.value === p.method)!;
+                                            const symbol = option.isBs ? getSymbol('Bs') : getSymbol('USD');
+                                            return (
+                                            <div key={p.id} className="p-3 border rounded-lg bg-background flex flex-col gap-2">
+                                                <div className="flex justify-between items-center">
+                                                    <Label className="flex items-center gap-2">{option.icon} {option.label}</Label>
+                                                    <Button variant="ghost" size="icon" className="w-6 h-6" onClick={() => handleRemoveChangePayment(p.id)}>
+                                                        <Trash2 className="w-4 h-4 text-destructive" />
+                                                    </Button>
                                                 </div>
-                                                {p.method === 'Pago Móvil' && (
-                                                  <Input
-                                                      type="text"
-                                                      value={p.reference || ''}
-                                                      onChange={(e) => handleUpdateChangePayment(p.id, 'reference', e.target.value)}
-                                                      placeholder="Referencia (opcional)"
-                                                      className="flex-1"
-                                                  />
-                                                )}
+                                                <div className="flex gap-2">
+                                                    <div className="relative flex-1">
+                                                        <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                                                            <span className="text-gray-500 sm:text-sm">{symbol}</span>
+                                                        </div>
+                                                        <Input
+                                                            type="number"
+                                                            value={p.amount || ''}
+                                                            onChange={(e) => handleUpdateChangePayment(p.id, 'amount', parseFloat(e.target.value) || 0)}
+                                                            placeholder="0,00"
+                                                            className="pl-7"
+                                                        />
+                                                    </div>
+                                                    {p.method === 'Pago Móvil' && (
+                                                    <Input
+                                                        type="text"
+                                                        value={p.reference || ''}
+                                                        onChange={(e) => handleUpdateChangePayment(p.id, 'reference', e.target.value)}
+                                                        placeholder="Referencia (opcional)"
+                                                        className="flex-1"
+                                                    />
+                                                    )}
+                                                </div>
                                             </div>
-                                        </div>
-                                        );
-                                    })}
-                                </div>
-                            </ScrollArea>
+                                            );
+                                        })}
+                                    </div>
+                                </ScrollArea>
+                            )}
+                            
+                            <div className={cn("text-center font-semibold p-2 rounded-md", Math.abs(changeDifference) > 0.01 ? "bg-destructive/20 text-destructive" : "bg-green-600/20 text-green-700")}>
+                                {Math.abs(changeDifference) > 0.01 
+                                ? `Falta por devolver: ${getSymbol()}${formatCurrency(Math.abs(changeDifference))} o Bs ${formatCurrency(convert(Math.abs(changeDifference), 'USD', 'Bs'), 'Bs')}` 
+                                : "Vuelto Correcto"}
+                            </div>
+                        </>
                         )}
-                        
-                        <div className={cn("text-center font-semibold p-2 rounded-md", Math.abs(changeDifference) > 0.01 ? "bg-destructive/20 text-destructive" : "bg-green-600/20 text-green-700")}>
-                            {Math.abs(changeDifference) > 0.01 
-                              ? `Falta por devolver: ${getSymbol()}${formatCurrency(Math.abs(changeDifference))} o Bs ${formatCurrency(convert(Math.abs(changeDifference), 'USD', 'Bs'), 'Bs')}` 
-                              : "Vuelto Correcto"}
-                        </div>
                     </div>
                  )}
 
             </div>
-            <Button size="lg" onClick={handleConfirm} disabled={!canConfirm || currencyLoading}>
+            <Button size="lg" onClick={handleConfirm} disabled={!canConfirm}>
                 {currencyLoading ? 'Cargando tasa...' : 'Confirmar Pago'}
             </Button>
             </>
@@ -335,4 +391,3 @@ export function CheckoutDialog({ cart, allProducts, total, children, onCheckout,
     </Dialog>
   );
 }
-

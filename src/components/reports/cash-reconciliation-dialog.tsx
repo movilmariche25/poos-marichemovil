@@ -40,7 +40,12 @@ export function CashReconciliationDialog({ openSales }: CashReconciliationDialog
     'Transferencia': 0,
   });
 
-  const expectedAmounts = useMemo(() => {
+  const {
+    expectedAmounts,
+    totalPaymentsInUSD,
+    totalChangeGivenInUSD,
+    netExpectedInUSD
+  } = useMemo(() => {
     const totals: Record<PaymentMethod, number> = {
       'Efectivo USD': 0,
       'Efectivo Bs': 0,
@@ -48,15 +53,34 @@ export function CashReconciliationDialog({ openSales }: CashReconciliationDialog
       'Pago Móvil': 0,
       'Transferencia': 0,
     };
+    let paymentsUSD = 0;
+    let changeUSD = 0;
+    
     openSales.forEach(sale => {
       sale.payments.forEach(payment => {
         if (totals[payment.method] !== undefined) {
           totals[payment.method] += payment.amount;
         }
+        paymentsUSD += payment.method === 'Efectivo USD' ? payment.amount : convert(payment.amount, 'Bs', 'USD');
       });
+      if (sale.changeGiven) {
+          sale.changeGiven.forEach(change => {
+              if (totals[change.method] !== undefined) {
+                  totals[change.method] -= change.amount;
+              }
+              changeUSD += change.method === 'Efectivo USD' ? change.amount : convert(change.amount, 'Bs', 'USD');
+          });
+      }
     });
-    return totals;
-  }, [openSales]);
+
+    return { 
+      expectedAmounts: totals,
+      totalPaymentsInUSD: paymentsUSD,
+      totalChangeGivenInUSD: changeUSD,
+      netExpectedInUSD: paymentsUSD - changeUSD
+    };
+  }, [openSales, convert]);
+
 
   const differences = useMemo(() => {
     return paymentMethodsOrder.reduce((acc, method) => {
@@ -65,7 +89,7 @@ export function CashReconciliationDialog({ openSales }: CashReconciliationDialog
     }, {} as Record<PaymentMethod, number>);
   }, [countedAmounts, expectedAmounts]);
 
-  const totalExpected = openSales.reduce((sum, sale) => sum + sale.totalAmount, 0);
+  const totalSalesValue = openSales.reduce((sum, sale) => sum + sale.totalAmount, 0);
   
   const totalCountedInUSD = useMemo(() => {
      return Object.entries(countedAmounts).reduce((acc, [method, amount]) => {
@@ -77,7 +101,7 @@ export function CashReconciliationDialog({ openSales }: CashReconciliationDialog
      }, 0)
   }, [countedAmounts, convert]);
 
-  const totalDifference = totalCountedInUSD - totalExpected;
+  const totalDifference = totalCountedInUSD - netExpectedInUSD;
   const transactionCount = openSales.length;
 
   const handleAmountChange = (method: PaymentMethod, value: string) => {
@@ -141,13 +165,15 @@ export function CashReconciliationDialog({ openSales }: CashReconciliationDialog
     const newReconciliation: DailyReconciliation = {
       id: reconciliationId,
       date: todayStr,
-      totalSales: totalExpected,
+      totalSales: totalSalesValue,
       totalTransactions: transactionCount,
       closedAt: new Date().toISOString(),
       paymentMethods: paymentMethodDetails,
-      totalExpected: totalExpected,
+      totalExpected: netExpectedInUSD,
       totalCounted: totalCountedInUSD,
       totalDifference: totalDifference,
+      totalPaymentsReceived: totalPaymentsInUSD,
+      totalChangeGiven: totalChangeGivenInUSD,
     };
     batch.set(reconciliationRef, newReconciliation);
 
@@ -187,19 +213,27 @@ export function CashReconciliationDialog({ openSales }: CashReconciliationDialog
         <CardHeader>
           <CardTitle>Cierre de Ventas del Día</CardTitle>
         </CardHeader>
-        <CardContent>
-           <div className="p-4 rounded-lg bg-muted flex items-center justify-between">
-                <div>
+        <CardContent className="space-y-3">
+           <div className="p-3 rounded-lg bg-muted space-y-2">
+                 <div className="flex items-center justify-between">
                     <p className="text-sm font-medium text-muted-foreground">Ventas abiertas hoy</p>
-                    <p className="text-2xl font-bold">{transactionCount}</p>
+                    <p className="text-lg font-bold">{transactionCount}</p>
                 </div>
-                <div>
-                    <p className="text-sm font-medium text-muted-foreground">Total a cerrar</p>
-                    <p className="text-2xl font-bold text-right">{getSymbol()}{formatCurrency(totalExpected)}</p>
+                <div className="flex items-center justify-between text-sm">
+                    <p className="text-muted-foreground">Pagos Recibidos</p>
+                    <p className="font-medium text-green-600">+{getSymbol()}{formatCurrency(totalPaymentsInUSD)}</p>
+                </div>
+                 <div className="flex items-center justify-between text-sm">
+                    <p className="text-muted-foreground">Vueltos Entregados</p>
+                    <p className="font-medium text-destructive">-{getSymbol()}{formatCurrency(totalChangeGivenInUSD)}</p>
+                </div>
+                 <div className="flex items-center justify-between font-bold text-base border-t pt-2 mt-2">
+                    <p>Neto Esperado en Caja</p>
+                    <p>{getSymbol()}{formatCurrency(netExpectedInUSD)}</p>
                 </div>
             </div>
           <DialogTrigger asChild>
-            <Button className="w-full mt-4" disabled={transactionCount === 0}>
+            <Button className="w-full mt-2" disabled={transactionCount === 0}>
               <DoorClosed className="mr-2 h-4 w-4" />
               Realizar Cierre de Caja
             </Button>

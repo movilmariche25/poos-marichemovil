@@ -36,7 +36,7 @@ export function ExchangeRateReminder() {
                 setIsAutoUpdating(true);
                 setShowAlert(false); // Hide alert while attempting update
                 try {
-                    const response = await fetch('https://ve.dolarapi.com/v1/dolares/oficial');
+                    const response = await fetch('https://ve.dolarapi.com/v1/dolares/bcv');
                     if (!response.ok) throw new Error('Network response was not ok.');
                     
                     const data = await response.json();

@@ -1,3 +1,4 @@
+
 "use client";
 
 import type { Product } from "@/lib/types";
@@ -60,16 +61,16 @@ export function ProductGrid({ products, onProductSelect, isLoading }: ProductGri
 
   const getAvailableStock = (product: Product) => {
       if (product.isCombo) {
-           if (!product.comboItems || product.comboItems.length === 0) return 0;
+           if (!product.comboItems || product.comboItems.length === 0 || !products) return 0;
            const stockCounts = product.comboItems.map(item => {
                const component = products.find(p => p.id === item.productId);
                if (!component) return 0;
-               const available = component.stockLevel - (component.reservedStock || 0);
+               const available = component.stockLevel - (component.reservedStock || 0) - (component.damagedStock || 0);
                return Math.floor(available / item.quantity);
            });
            return Math.min(...stockCounts);
       }
-      return product.stockLevel - (product.reservedStock || 0);
+      return product.stockLevel - (product.reservedStock || 0) - (product.damagedStock || 0);
   };
   
   const handlePreviousPage = () => {

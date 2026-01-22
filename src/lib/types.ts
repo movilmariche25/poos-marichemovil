@@ -120,6 +120,8 @@ export type DailyReconciliation = {
   totalExpected: number;
   totalCounted: number;
   totalDifference: number;
+  totalPaymentsReceived?: number;
+  totalChangeGiven?: number;
 };
 
 

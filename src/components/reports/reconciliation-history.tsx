@@ -103,12 +103,26 @@ export function ReconciliationHistory({ reconciliations, isLoading }: Reconcilia
                         </AccordionTrigger>
                         <AccordionContent>
                            <div className="p-4 bg-muted/50 rounded-lg">
-                                <div className="flex justify-between items-center mb-2">
+                                <div className="flex justify-between items-center mb-4">
                                     <h4 className="font-semibold">Detalles del Cierre</h4>
                                     <Button variant="outline" size="sm" onClick={() => onPrint(recon)}>
                                         <Printer className="mr-2 h-4 w-4" />
                                         Imprimir
                                     </Button>
+                                </div>
+                                <div className="space-y-1 text-sm mb-4">
+                                    <div className="flex justify-between">
+                                        <span>Pagos Recibidos:</span>
+                                        <span className="font-medium text-green-600">+{getSymbol('USD')}{formatCurrency(recon.totalPaymentsReceived ?? 0, 'USD')}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span>Vueltos Entregados:</span>
+                                        <span className="font-medium text-destructive">-{getSymbol('USD')}{formatCurrency(recon.totalChangeGiven ?? 0, 'USD')}</span>
+                                    </div>
+                                    <div className="flex justify-between font-bold border-t pt-1 mt-1">
+                                        <span>Neto Esperado:</span>
+                                        <span>{getSymbol('USD')}{formatCurrency(recon.totalExpected, 'USD')}</span>
+                                    </div>
                                 </div>
                                 <Table>
                                     <TableHeader>

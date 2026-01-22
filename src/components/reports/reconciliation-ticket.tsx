@@ -41,6 +41,23 @@ export function ReconciliationTicket({ reconciliation, currency }: Reconciliatio
                 </div>
             </div>
             
+             <div className="my-2 border-t border-dashed border-black"></div>
+
+            <div className="space-y-1">
+                 <div className="flex justify-between">
+                    <span>Pagos Recibidos:</span>
+                    <span className="font-medium">+{getSymbol('USD')}{format(reconciliation.totalPaymentsReceived ?? 0, 'USD')}</span>
+                </div>
+                <div className="flex justify-between">
+                    <span>Vueltos Entregados:</span>
+                    <span className="font-medium">-{getSymbol('USD')}{format(reconciliation.totalChangeGiven ?? 0, 'USD')}</span>
+                </div>
+                <div className="flex justify-between font-bold border-t border-dashed mt-1 pt-1">
+                    <span>Neto Esperado:</span>
+                    <span>{getSymbol('USD')}{format(reconciliation.totalExpected, 'USD')}</span>
+                </div>
+            </div>
+
             <div className="my-2 border-t border-dashed border-black"></div>
 
             <div className="space-y-2">
@@ -53,7 +70,7 @@ export function ReconciliationTicket({ reconciliation, currency }: Reconciliatio
                             <p className="font-semibold text-center">{method}</p>
                             <div className="flex justify-between"><span>Esperado:</span><span>{symbol}{format(details.expected)}</span></div>
                             <div className="flex justify-between"><span>Contado:</span><span>{symbol}{format(details.counted)}</span></div>
-                            <div className={cn("flex justify-between font-bold", details.difference < 0 ? 'text-destructive' : 'text-green-600')}>
+                            <div className="flex justify-between font-bold">
                                 <span>Diferencia:</span><span>{details.difference >= 0 ? '+' : ''}{symbol}{format(details.difference)}</span>
                             </div>
                         </div>
@@ -65,7 +82,7 @@ export function ReconciliationTicket({ reconciliation, currency }: Reconciliatio
 
              <div className="flex justify-between font-bold text-sm">
                 <p>Dif. Total (USD):</p>
-                 <p className={cn(reconciliation.totalDifference < 0 ? 'text-destructive' : 'text-green-600')}>
+                 <p>
                     {reconciliation.totalDifference >= 0 ? '+' : ''}{getSymbol('USD')}{format(reconciliation.totalDifference, 'USD')}
                 </p>
              </div>
@@ -96,8 +113,8 @@ export const handlePrintReconciliation = (props: ReconciliationTicketProps, onEr
                         .space-y-2 > :not([hidden]) ~ :not([hidden]) { margin-top: 0.5rem; }
                         .justify-between { justify-content: space-between; }
                         .font-semibold { font-weight: 600; }
-                        .text-destructive { color: #000; }
-                        .text-green-600 { color: #000; }
+                        .mt-1 { margin-top: 0.25rem; } .pt-1 { padding-top: 0.25rem; }
+                        .font-medium { font-weight: 500; }
                     </style>
                 </head>
                 <body>
