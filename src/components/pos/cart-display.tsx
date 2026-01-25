@@ -13,7 +13,7 @@ import { useRouter } from "next/navigation";
 import { ScrollArea } from "../ui/scroll-area";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
 import { useFirebase, useDoc, useMemoFirebase } from "@/firebase";
-import { collection, doc, writeBatch, runTransaction } from "firebase/firestore";
+import { collection, doc, writeBatch, runTransaction, DocumentSnapshot, DocumentData } from "firebase/firestore";
 import { useToast } from "@/hooks/use-toast";
 import { format } from 'date-fns';
 import { cn } from "@/lib/utils";
@@ -89,55 +89,107 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
             : item.name
       }));
 
-      // In a transaction, update all product stocks
       try {
         await runTransaction(firestore, async (transaction) => {
-          for (const item of cartWithFinalPrices) {
-            if (item.isRepair && activeRepairJob?.reservedParts) {
-                // When a repair is paid, the reserved parts are "consumed".
-                // We decrease reserved stock and total stock level.
-                for (const part of activeRepairJob.reservedParts) {
-                    const productRef = doc(firestore, 'products', part.productId);
-                    const productDoc = await transaction.get(productRef);
-                    if (productDoc.exists()) {
-                        const productData = productDoc.data() as Product;
-                        const newReservedStock = (productData.reservedStock || 0) - part.quantity;
-                        const newStockLevel = productData.stockLevel - part.quantity;
-                        transaction.update(productRef, { 
-                            reservedStock: Math.max(0, newReservedStock),
-                            stockLevel: Math.max(0, newStockLevel),
-                        });
+            const productDocs = new Map<string, DocumentSnapshot<DocumentData>>();
+            const allNeededProductIds = new Set<string>();
+    
+            // Phase 1.1: Discover all unique product IDs we need to read from the cart
+            for (const item of cartWithFinalPrices) {
+                if (item.productId.startsWith('abono-')) continue;
+    
+                if (item.isRepair && activeRepairJob?.reservedParts) {
+                    for (const part of activeRepairJob.reservedParts) {
+                        allNeededProductIds.add(part.productId);
+                    }
+                } else {
+                    allNeededProductIds.add(item.productId);
+                }
+            }
+            
+            // Phase 1.2: Read the first level of products to discover combo components
+            const initialIds = Array.from(allNeededProductIds);
+            if (initialIds.length > 0) {
+                const initialDocsPromises = initialIds.map(id => transaction.get(doc(firestore, 'products', id)));
+                const initialFetchedDocs = await Promise.all(initialDocsPromises);
+        
+                for (let i = 0; i < initialIds.length; i++) {
+                    const productId = initialIds[i];
+                    const productDoc = initialFetchedDocs[i];
+                    if (!productDoc.exists()) throw new Error(`Producto con ID ${productId} no encontrado.`);
+                    productDocs.set(productId, productDoc);
+        
+                    const productData = productDoc.data() as Product;
+                    if (productData.isCombo && productData.comboItems) {
+                        for (const comboItem of productData.comboItems) {
+                            allNeededProductIds.add(comboItem.productId); // Add component IDs
+                        }
                     }
                 }
-                continue;
             }
-
-            // For direct sales, we decrement the stock level.
-            const productRef = doc(firestore, 'products', item.productId);
-            const productDoc = await transaction.get(productRef);
-            if (!productDoc.exists()) {
-              throw new Error(`Producto ${item.name} no encontrado.`);
-            }
-
-            const product = productDoc.data() as Product;
             
-            if (product.isCombo && product.comboItems) {
-              for (const comboItem of product.comboItems) {
-                const componentRef = doc(firestore, 'products', comboItem.productId);
-                const componentDoc = await transaction.get(componentRef);
-                if (!componentDoc.exists()) {
-                   throw new Error(`Componente ${comboItem.productName} del combo no encontrado.`);
+            // Phase 1.3: Read any newly discovered component products
+            const finalIdsToFetch = Array.from(allNeededProductIds).filter(id => !productDocs.has(id));
+            if (finalIdsToFetch.length > 0) {
+                const componentDocsPromises = finalIdsToFetch.map(id => transaction.get(doc(firestore, 'products', id)));
+                const componentFetchedDocs = await Promise.all(componentDocsPromises);
+                for (let i = 0; i < finalIdsToFetch.length; i++) {
+                    const productId = finalIdsToFetch[i];
+                    const productDoc = componentFetchedDocs[i];
+                    if (!productDoc.exists()) throw new Error(`Componente con ID ${productId} no encontrado.`);
+                    productDocs.set(productId, productDoc);
                 }
-                const componentData = componentDoc.data() as Product;
-                const quantityToDecrement = comboItem.quantity * item.quantity;
-                const newStockLevel = componentData.stockLevel - quantityToDecrement;
-                transaction.update(componentRef, { stockLevel: Math.max(0, newStockLevel) });
-              }
-            } else {
-              const newStockLevel = product.stockLevel - item.quantity;
-              transaction.update(productRef, { stockLevel: Math.max(0, newStockLevel) });
             }
-          }
+            // --- ALL READS ARE NOW COMPLETE ---
+    
+            // Phase 2: Calculate decrements
+            const stockDecrements = new Map<string, number>();
+            const reservedDecrements = new Map<string, number>();
+    
+            for (const item of cartWithFinalPrices) {
+                if (item.productId.startsWith('abono-')) continue;
+    
+                if (item.isRepair && activeRepairJob?.reservedParts) {
+                    for (const part of activeRepairJob.reservedParts) {
+                        stockDecrements.set(part.productId, (stockDecrements.get(part.productId) || 0) + part.quantity);
+                        reservedDecrements.set(part.productId, (reservedDecrements.get(part.productId) || 0) + part.quantity);
+                    }
+                    continue;
+                }
+    
+                const productData = productDocs.get(item.productId)!.data() as Product;
+                if (productData.isCombo && productData.comboItems) {
+                    for (const comboItem of productData.comboItems) {
+                        const quantityToDecrement = comboItem.quantity * item.quantity;
+                        stockDecrements.set(comboItem.productId, (stockDecrements.get(comboItem.productId) || 0) + quantityToDecrement);
+                    }
+                } else {
+                    stockDecrements.set(item.productId, (stockDecrements.get(item.productId) || 0) + item.quantity);
+                }
+            }
+    
+            // Phase 3: Apply writes
+            for (const [productId, decrementQuantity] of stockDecrements.entries()) {
+                const productDoc = productDocs.get(productId)!;
+                const productData = productDoc.data() as Product;
+                
+                const newStockLevel = productData.stockLevel - decrementQuantity;
+                const availableStockForCheck = productData.stockLevel - (productData.reservedStock || 0);
+
+                if (decrementQuantity > availableStockForCheck) {
+                     throw new Error(`Error de stock: No hay suficientes unidades de "${productData.name}".`);
+                }
+    
+                const updatePayload: any = { stockLevel: newStockLevel };
+                
+                if (reservedDecrements.has(productId)) {
+                    const reservedDecrement = reservedDecrements.get(productId)!;
+                    const newReservedStock = (productData.reservedStock || 0) - reservedDecrement;
+                    updatePayload.reservedStock = Math.max(0, newReservedStock);
+                }
+    
+                transaction.update(productDoc.ref, updatePayload);
+            }
         });
       } catch (error: any) {
         console.error("Error updating stock during sale:", error);
