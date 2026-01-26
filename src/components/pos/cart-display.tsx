@@ -103,43 +103,30 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
                         allNeededProductIds.add(part.productId);
                     }
                 } else {
+                    const productInfo = allProducts.find(p => p.id === item.productId);
+                    if(productInfo?.isCombo && productInfo.comboItems) {
+                        for(const comboItem of productInfo.comboItems) {
+                            allNeededProductIds.add(comboItem.productId);
+                        }
+                    }
                     allNeededProductIds.add(item.productId);
                 }
             }
             
-            // Phase 1.2: Read the first level of products to discover combo components
-            const initialIds = Array.from(allNeededProductIds);
-            if (initialIds.length > 0) {
-                const initialDocsPromises = initialIds.map(id => transaction.get(doc(firestore, 'products', id)));
-                const initialFetchedDocs = await Promise.all(initialDocsPromises);
+            // Phase 1.2: Read all necessary product documents
+            const allIds = Array.from(allNeededProductIds);
+            if (allIds.length > 0) {
+                const fetchedDocsPromises = allIds.map(id => transaction.get(doc(firestore, 'products', id)));
+                const fetchedDocs = await Promise.all(fetchedDocsPromises);
         
-                for (let i = 0; i < initialIds.length; i++) {
-                    const productId = initialIds[i];
-                    const productDoc = initialFetchedDocs[i];
+                for (let i = 0; i < allIds.length; i++) {
+                    const productId = allIds[i];
+                    const productDoc = fetchedDocs[i];
                     if (!productDoc.exists()) throw new Error(`Producto con ID ${productId} no encontrado.`);
                     productDocs.set(productId, productDoc);
-        
-                    const productData = productDoc.data() as Product;
-                    if (productData.isCombo && productData.comboItems) {
-                        for (const comboItem of productData.comboItems) {
-                            allNeededProductIds.add(comboItem.productId); // Add component IDs
-                        }
-                    }
                 }
             }
             
-            // Phase 1.3: Read any newly discovered component products
-            const finalIdsToFetch = Array.from(allNeededProductIds).filter(id => !productDocs.has(id));
-            if (finalIdsToFetch.length > 0) {
-                const componentDocsPromises = finalIdsToFetch.map(id => transaction.get(doc(firestore, 'products', id)));
-                const componentFetchedDocs = await Promise.all(componentDocsPromises);
-                for (let i = 0; i < finalIdsToFetch.length; i++) {
-                    const productId = finalIdsToFetch[i];
-                    const productDoc = componentFetchedDocs[i];
-                    if (!productDoc.exists()) throw new Error(`Componente con ID ${productId} no encontrado.`);
-                    productDocs.set(productId, productDoc);
-                }
-            }
             // --- ALL READS ARE NOW COMPLETE ---
     
             // Phase 2: Calculate decrements
@@ -172,23 +159,28 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
             for (const [productId, decrementQuantity] of stockDecrements.entries()) {
                 const productDoc = productDocs.get(productId)!;
                 const productData = productDoc.data() as Product;
-                
                 const newStockLevel = productData.stockLevel - decrementQuantity;
-                const availableStockForCheck = productData.stockLevel - (productData.reservedStock || 0);
+                const isRepairPart = reservedDecrements.has(productId);
 
-                if (decrementQuantity > availableStockForCheck) {
-                     throw new Error(`Error de stock: No hay suficientes unidades de "${productData.name}".`);
-                }
-    
-                const updatePayload: any = { stockLevel: newStockLevel };
-                
-                if (reservedDecrements.has(productId)) {
+                if (isRepairPart) {
+                    // This is a repair part being consumed from reservation.
                     const reservedDecrement = reservedDecrements.get(productId)!;
+                     if (productData.stockLevel < decrementQuantity || (productData.reservedStock || 0) < reservedDecrement) {
+                        throw new Error(`Error de consistencia de stock para la pieza reservada "${productData.name}".`);
+                    }
                     const newReservedStock = (productData.reservedStock || 0) - reservedDecrement;
-                    updatePayload.reservedStock = Math.max(0, newReservedStock);
+                    transaction.update(productDoc.ref, {
+                        stockLevel: newStockLevel,
+                        reservedStock: Math.max(0, newReservedStock)
+                    });
+                } else {
+                    // This is a standard sale item. Check against available stock.
+                    const availableStockForCheck = productData.stockLevel - (productData.reservedStock || 0);
+                    if (decrementQuantity > availableStockForCheck) {
+                        throw new Error(`Error de stock: No hay suficientes unidades de "${productData.name}".`);
+                    }
+                    transaction.update(productDoc.ref, { stockLevel: newStockLevel });
                 }
-    
-                transaction.update(productDoc.ref, updatePayload);
             }
         });
       } catch (error: any) {
