@@ -87,14 +87,17 @@ export function CheckoutDialog({ cart, allProducts, total, children, onCheckout,
   const changeDifference = useMemo(() => requiredChangeInUSD - totalGivenInUSD, [requiredChangeInUSD, totalGivenInUSD]);
   
   const canConfirm = useMemo(() => {
-    if (total <= 0 || payments.length === 0 || currencyLoading) return false;
-
-    if (isGivingChange) {
-      return totalPaid > total && Math.abs(changeDifference) < 0.01;
-    } else {
-      return totalPaid > 0;
+    // Cannot confirm if cart is empty, no payment method is selected, or currency rates are loading.
+    if (total <= 0 || payments.length === 0 || currencyLoading) {
+      return false;
     }
-  }, [total, totalPaid, payments, isGivingChange, changeDifference, currencyLoading]);
+    
+    // Allow completing the sale even with a partial payment or with inexact change.
+    // The only real gate is that *some* payment amount has been entered.
+    return totalPaid > 0;
+
+  }, [total, totalPaid, payments, currencyLoading]);
+
 
   useEffect(() => {
     if (potentialChangeInUSD <= 0.001) {
