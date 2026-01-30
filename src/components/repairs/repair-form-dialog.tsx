@@ -208,6 +208,7 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
   useEffect(() => {
     if (!mainPart) {
         form.setValue('estimatedCost', 0);
+        form.setValue('reservedParts', []);
         return;
     }
     
@@ -348,44 +349,68 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
             const jobId = repairJob?.id || generateJobId();
             const jobRef = doc(firestore, 'repair_jobs', jobId);
 
-            // Get current job data to safely update amountPaid
-            let currentAmountPaid = 0;
+            // --- GATHER IDs & INITIAL READ ---
             let existingJobData: RepairJob | null = null;
             if (repairJob) {
                 const jobDoc = await transaction.get(jobRef);
                 if (jobDoc.exists()) {
                     existingJobData = jobDoc.data() as RepairJob;
-                    currentAmountPaid = existingJobData.amountPaid || 0;
                 }
             }
 
-            // Handle part reservations
             const oldParts = existingJobData?.reservedParts || [];
             const newParts = values.reservedParts || [];
+
+            const stockDeltas = new Map<string, number>();
+            // Parts to be un-reserved
             for (const oldPart of oldParts) {
-                if (!newParts.some(p => p.productId === oldPart.productId)) {
-                    const productRef = doc(firestore, "products", oldPart.productId);
-                    const productDoc = await transaction.get(productRef);
-                    if (productDoc.exists()) {
-                        const currentReserved = productDoc.data().reservedStock || 0;
-                        transaction.update(productRef, { reservedStock: Math.max(0, currentReserved - oldPart.quantity) });
-                    }
-                }
+                stockDeltas.set(oldPart.productId, (stockDeltas.get(oldPart.productId) || 0) - oldPart.quantity);
             }
+            // Parts to be reserved
             for (const newPart of newParts) {
-                if (!oldParts.some(p => p.productId === newPart.productId)) {
-                    const productRef = doc(firestore, "products", newPart.productId);
-                    const productDoc = await transaction.get(productRef);
-                    if (!productDoc.exists()) throw new Error(`La pieza ${newPart.productName} no se encuentra.`);
-                    const productData = productDoc.data();
-                    const availableStock = productData.stockLevel - (productData.reservedStock || 0);
-                    if (availableStock < newPart.quantity) throw new Error(`Stock insuficiente para "${newPart.productName}".`);
-                    const currentReserved = productData.reservedStock || 0;
-                    transaction.update(productRef, { reservedStock: currentReserved + newPart.quantity });
+                stockDeltas.set(newPart.productId, (stockDeltas.get(newPart.productId) || 0) + newPart.quantity);
+            }
+            
+            const productIdsToRead = Array.from(stockDeltas.keys()).filter(id => stockDeltas.get(id) !== 0);
+
+            // --- PHASE 1: ALL READS ---
+            const productDocs = productIdsToRead.length > 0 
+                ? await Promise.all(productIdsToRead.map(id => transaction.get(doc(firestore, "products", id))))
+                : [];
+            
+            const productDataMap = new Map<string, Product>();
+
+            for (let i = 0; i < productDocs.length; i++) {
+                const productDoc = productDocs[i];
+                if (!productDoc.exists()) {
+                    const partName = oldParts.find(p => p.productId === productIdsToRead[i])?.productName || newParts.find(p => p.productId === productIdsToRead[i])?.productName || `ID ${productIdsToRead[i]}`;
+                    throw new Error(`La pieza "${partName}" no se encuentra en el inventario.`);
                 }
+                productDataMap.set(productIdsToRead[i], productDoc.data() as Product);
             }
 
-            // Handle new abono
+            // --- PHASE 2: ALL WRITES ---
+            
+            // Apply inventory updates
+            for (const [productId, delta] of stockDeltas.entries()) {
+                if (delta === 0) continue;
+
+                const productData = productDataMap.get(productId)!;
+                const productRef = doc(firestore, "products", productId);
+                const currentReserved = productData.reservedStock || 0;
+
+                if (delta > 0) { // New or increased reservation
+                    const availableStock = productData.stockLevel - currentReserved;
+                    if (availableStock < delta) {
+                        throw new Error(`Stock insuficiente para "${productData.name}". Solo hay ${availableStock} disponibles para reservar.`);
+                    }
+                    transaction.update(productRef, { reservedStock: currentReserved + delta });
+                } else { // Decreased or removed reservation
+                    transaction.update(productRef, { reservedStock: Math.max(0, currentReserved + delta) }); // delta is negative
+                }
+            }
+            
+            // Handle new abono (payment)
             let newAbonoAmountUSD = 0;
             if (values.hasNewAbono && values.newAbonoAmount && values.newAbonoAmount > 0 && values.newAbonoPaymentMethod) {
                 const saleId = generateSaleId();
@@ -418,7 +443,8 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
                 transaction.set(saleRef, newSaleData);
             }
 
-            // Prepare final RepairJob data
+            // Update the repair job itself
+            const currentAmountPaid = existingJobData?.amountPaid || 0;
             const wasCompleted = existingJobData?.status === 'Completado';
             const isNowCompleted = values.status === 'Completado';
             let completionData: Partial<RepairJob> = {};
@@ -439,7 +465,6 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
                 ...completionData
             };
             
-            // Set or merge data
             if (existingJobData) {
                 transaction.set(jobRef, finalJobData, { merge: true });
             } else {
@@ -651,42 +676,47 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
                     <legend className="text-lg font-semibold mb-4 col-span-2">Costos y Pagos</legend>
                     <div>
                         <Label>Pieza Principal de la Reparación</Label>
-                        <Popover open={partsPopoverOpen} onOpenChange={setPartsPopoverOpen}>
-                            <PopoverTrigger asChild>
-                                <Button type="button" variant="outline" className="w-full justify-start text-left font-normal mt-1" disabled={isReadOnly}>
-                                    {mainPart ? mainPart.name : "Seleccionar pieza principal..."}
-                                </Button>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-[300px] p-0">
-                                <Command>
-                                    <CommandInput placeholder="Buscar pieza..." />
-                                    <CommandList>
-                                    <CommandEmpty>No se encontraron piezas.</CommandEmpty>
-                                    <CommandGroup>
-                                        {(products || []).map((product) => {
-                                            const availableStock = product.stockLevel - (product.reservedStock || 0);
-                                            return (
-                                                <CommandItem
-                                                    key={product.id}
-                                                    value={product.name}
-                                                    onSelect={() => {
-                                                        setMainPart(product);
-                                                        setUsePromoPrice(false); // Reset promo on new part selection
-                                                        setPartsPopoverOpen(false);
-                                                    }}
-                                                    disabled={availableStock <= 0}
-                                                    className="flex justify-between"
-                                                >
-                                                    <span>{product.name}</span>
-                                                    <span className="text-xs text-muted-foreground">Disp: {availableStock}</span>
-                                                </CommandItem>
-                                            )
-                                        })}
-                                    </CommandGroup>
-                                    </CommandList>
-                                </Command>
-                            </PopoverContent>
-                        </Popover>
+                        <div className="flex items-center gap-2 mt-1">
+                             <div className="flex-grow p-2 h-10 border rounded-md bg-muted text-sm flex items-center">
+                                <span className="truncate">{mainPart ? mainPart.name : "Ninguna seleccionada"}</span>
+                            </div>
+                            <Popover open={partsPopoverOpen} onOpenChange={setPartsPopoverOpen}>
+                                <PopoverTrigger asChild>
+                                     <Button type="button" variant="outline" disabled={isReadOnly}>
+                                        Cambiar
+                                    </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-[300px] p-0">
+                                    <Command>
+                                        <CommandInput placeholder="Buscar pieza..." />
+                                        <CommandList>
+                                        <CommandEmpty>No se encontraron piezas.</CommandEmpty>
+                                        <CommandGroup>
+                                            {(products || []).map((product) => {
+                                                const availableStock = product.stockLevel - (product.reservedStock || 0);
+                                                return (
+                                                    <CommandItem
+                                                        key={product.id}
+                                                        value={product.name}
+                                                        onSelect={() => {
+                                                            setMainPart(product);
+                                                            setUsePromoPrice(false); // Reset promo on new part selection
+                                                            setPartsPopoverOpen(false);
+                                                        }}
+                                                        disabled={availableStock <= 0}
+                                                        className="flex justify-between"
+                                                    >
+                                                        <span>{product.name}</span>
+                                                        <span className="text-xs text-muted-foreground">Disp: {availableStock}</span>
+                                                    </CommandItem>
+                                                )
+                                            })}
+                                        </CommandGroup>
+                                        </CommandList>
+                                    </Command>
+                                </PopoverContent>
+                            </Popover>
+                        </div>
                     </div>
 
                     <div className="col-span-2 flex items-end gap-2">
@@ -770,7 +800,7 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
                                 name="newAbonoAmount"
                                 render={({ field }) => (
                                     <FormItem>
-                                        <FormLabel>Monto del Abono</FormLabel>
+                                        <FormLabel>Monto del Abono ({isBsAbono ? getSymbol('Bs') : getSymbol('USD')})</FormLabel>
                                         <FormControl>
                                             <Input type="number" step="0.01" {...field} />
                                         </FormControl>
