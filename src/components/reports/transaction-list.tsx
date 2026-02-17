@@ -1,5 +1,4 @@
 
-
 "use client"
 
 import type { Sale, Payment, Product, CartItem, RepairJob } from "@/lib/types";
@@ -64,7 +63,10 @@ const RefundButton = ({ sale }: { sale: Sale }) => {
 
                 // Handle inventory for ALL items being returned in the sale
                 for (const item of sale.items) {
-                    // For a repair item, the actual parts are in 'consumedParts'
+                    // 1. Skip custom items - they don't exist in inventory
+                    if (item.isCustom) continue;
+
+                    // 2. For a repair item, the actual parts are in 'consumedParts'
                     if (item.isRepair) {
                         if (sale.consumedParts && sale.consumedParts.length > 0) {
                             for (const part of sale.consumedParts) {
@@ -80,10 +82,10 @@ const RefundButton = ({ sale }: { sale: Sale }) => {
                                 }
                             }
                         }
-                        continue; // Move to the next item in the sale
+                        continue; 
                     }
 
-                    // For regular items (simple products or combos)
+                    // 3. For regular items (simple products or combos)
                     const productRef = doc(firestore, 'products', item.productId);
                     const productDoc = await transaction.get(productRef);
                     

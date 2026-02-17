@@ -6,183 +6,298 @@ import { renderToString } from "react-dom/server";
 
 type RepairTicketProps = {
     repairJob: RepairJob;
-    variant: 'client' | 'internal';
 }
 
-export function RepairTicket({ repairJob, variant }: RepairTicketProps) {
+// SECCIÓN 1: NOTA DE ENTREGA (CLIENTE)
+export function CustomerTicket({ repairJob }: RepairTicketProps) {
+    const total = repairJob.estimatedCost || 0;
     const abono = repairJob.amountPaid || 0;
-    
-    // Internal Ticket
-    if (variant === 'internal') {
-        return (
-             <div className="text-black bg-white p-2 font-mono text-xs max-w-[215px] mx-auto">
-                <div className="text-center mb-2">
-                    <h3 className="font-bold text-sm">Nota de Entrega (INTERNA)</h3>
-                    <p>MARICHE MOVIL</p>
-                    <p>Fecha: {repairJob.createdAt ? format(parseISO(repairJob.createdAt), "dd/MM/yy hh:mm a", { locale: es }) : ''}</p>
-                    <p className="font-bold text-sm">ID: {repairJob.id}</p>
-                </div>
-                
-                <div className="my-2 border-t border-dashed border-black"></div>
+    const saldo = Math.max(0, total - abono);
+    const date = repairJob.createdAt ? parseISO(repairJob.createdAt) : new Date();
+    const fecha = format(date, "dd/MM/yy hh:mm a", { locale: es });
 
-                <div className="space-y-1">
-                    <p><span className="font-semibold">Cliente:</span> {repairJob.customerName}</p>
-                    {repairJob.customerID && <p><span className="font-semibold">CI:</span> {repairJob.customerID}</p>}
-                    <p><span className="font-semibold">Teléfono:</span> {repairJob.customerPhone}</p>
-                    {repairJob.customerAddress && <p><span className="font-semibold">Dirección:</span> {repairJob.customerAddress}</p>}
-                </div>
-
-                <div className="my-2 border-t border-dashed border-black"></div>
-
-                <div className="space-y-1">
-                    <p><span className="font-semibold">Dispositivo:</span> {repairJob.deviceMake} {repairJob.deviceModel}</p>
-                    {repairJob.deviceImei && <p><span className="font-semibold">IMEI/Serie:</span> {repairJob.deviceImei}</p>}
-                    <div>
-                        <p className="font-semibold">Falla Reportada:</p>
-                        <p className="break-words">{repairJob.reportedIssue}</p>
-                    </div>
-                    {(repairJob.initialConditionsChecklist && repairJob.initialConditionsChecklist.length > 0) && (
-                        <div className="mt-1">
-                            <p className="font-semibold">Condiciones Iniciales:</p>
-                            <ul className="list-disc list-inside">
-                                {repairJob.initialConditionsChecklist.map((item, index) => <li key={index}>{item}</li>)}
-                            </ul>
-                        </div>
-                    )}
-                </div>
-
-                <div className="my-2 border-t border-dashed border-black"></div>
-
-                <div className="text-right space-y-1">
-                    <p><span className="font-semibold">Costo Estimado:</span> ${repairJob.estimatedCost.toFixed(2)}</p>
-                    {abono > 0 && (
-                        <>
-                            <p><span className="font-semibold">Abono:</span> ${abono.toFixed(2)}</p>
-                            <p className="font-bold"><span className="font-semibold">Saldo Pendiente:</span> ${Math.max(0, repairJob.estimatedCost - abono).toFixed(2)}</p>
-                        </>
-                    )}
-                </div>
-
-                <div className="mt-4 pt-4 border-t border-black">
-                    <p className="text-center">_________________________</p>
-                    <p className="text-center font-semibold">Firma del Cliente</p>
-                </div>
-
-                <div className="mt-4 pt-2 border-t border-dashed border-black text-center">
-                    <p className="text-xs">Recorte y pegue en el equipo</p>
-                    <p className="font-bold text-lg tracking-wider">{repairJob.id}</p>
-                </div>
-             </div>
-        )
-    }
-
-    // Client Ticket
     return (
-        <div className="text-black bg-white p-2 font-mono text-xs max-w-[215px] mx-auto">
+        <div className="text-black bg-white font-mono text-[10px] max-w-[215px] mx-auto">
             <div className="text-center mb-2">
-                <h3 className="font-bold text-sm">Nota de Entrega</h3>
-                <p>MARICHE MOVIL</p>
-                <p>Fecha: {repairJob.createdAt ? format(parseISO(repairJob.createdAt), "dd/MM/yy hh:mm a", { locale: es }) : ''}</p>
-                <p className="font-bold text-sm">ID: {repairJob.id}</p>
+                <h3 className="font-bold text-sm uppercase">MARICHE MOVIL</h3>
+                <p className="text-[9px] font-bold">NOTA DE ENTREGA (CLIENTE)</p>
             </div>
             
-            <div className="my-2 border-t border-dashed border-black"></div>
-
-            <div className="space-y-1">
-                <p><span className="font-semibold">Cliente:</span> {repairJob.customerName}</p>
-                {repairJob.customerID && <p><span className="font-semibold">CI:</span> {repairJob.customerID}</p>}
-                <p><span className="font-semibold">Teléfono:</span> {repairJob.customerPhone}</p>
-                {repairJob.customerAddress && <p><span className="font-semibold">Dirección:</span> {repairJob.customerAddress}</p>}
+            <div className="flex justify-between text-[9px] font-bold mb-2">
+                <span>{fecha}</span>
+                <span>ID: {repairJob.id}</span>
             </div>
 
-            <div className="my-2 border-t border-dashed border-black"></div>
+            <div className="space-y-0.5">
+                <p><span className="font-bold">Cliente:</span> {repairJob.customerName}</p>
+                <p><span className="font-bold">CI:</span> {repairJob.customerID || 'N/A'} | <span className="font-bold">Tlf:</span> {repairJob.customerPhone}</p>
+                <p><span className="font-bold">Equipo:</span> {repairJob.deviceMake} {repairJob.deviceModel}</p>
+                {repairJob.deviceImei && <p><span className="font-bold">IMEI:</span> {repairJob.deviceImei}</p>}
+                <p><span className="font-bold">Falla:</span> {repairJob.reportedIssue}</p>
+            </div>
 
-            <div className="space-y-1">
-                <p><span className="font-semibold">Dispositivo:</span> {repairJob.deviceMake} {repairJob.deviceModel}</p>
-                {repairJob.deviceImei && <p><span className="font-semibold">IMEI/Serie:</span> {repairJob.deviceImei}</p>}
-                <div>
-                    <p className="font-semibold">Falla Reportada:</p>
-                    <p className="break-words">{repairJob.reportedIssue}</p>
+            <div className="border-t border-black mt-2 pt-1 space-y-1">
+                <div className="flex justify-between">
+                    <span>Costo Total:</span>
+                    <span>${total.toFixed(2)}</span>
                 </div>
-                 {(repairJob.initialConditionsChecklist && repairJob.initialConditionsChecklist.length > 0) && (
-                    <div className="mt-1">
-                        <p className="font-semibold">Condiciones Iniciales:</p>
-                        <ul className="list-disc list-inside">
-                            {repairJob.initialConditionsChecklist.map((item, index) => <li key={index}>{item}</li>)}
-                        </ul>
-                    </div>
-                )}
+                <div className="flex justify-between">
+                    <span>Abono:</span>
+                    <span>${abono.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between font-bold text-xs border-t border-black pt-1">
+                    <span>SALDO PENDIENTE:</span>
+                    <span>${saldo.toFixed(2)}</span>
+                </div>
             </div>
 
-            <div className="my-2 border-t border-dashed border-black"></div>
-
-            <div className="text-right space-y-1">
-                <p><span className="font-semibold">Costo Estimado:</span> ${repairJob.estimatedCost.toFixed(2)}</p>
-                {abono > 0 && (
-                    <>
-                        <p><span className="font-semibold">Abono:</span> ${abono.toFixed(2)}</p>
-                        <p className="font-bold"><span className="font-semibold">Saldo Pendiente:</span> ${Math.max(0, repairJob.estimatedCost - abono).toFixed(2)}</p>
-                    </>
-                )}
+            <div className="border-t border-black mt-2 pt-1 text-[8px] leading-tight space-y-1 italic">
+                <p><span className="font-bold">Garantía:</span> 4 días por el servicio específico realizado.</p>
+                <p><span className="font-bold">PLAZO DE RETIRO:</span> 7 días continuos una vez notificado. Pasado este lapso, MARICHE MOVIL no se hace responsable por la integridad, resguardo o pérdida del mismo.</p>
+                <p>Indispensable presentar este ticket para el retiro del equipo.</p>
             </div>
-
-             <div className="my-2 border-t border-dashed border-black"></div>
-
-            <div className="text-left mt-2 text-[10px] space-y-1">
-                <p className="font-bold text-center">Términos y Condiciones:</p>
-                <p>1. La garantía del servicio o reparación es de 4 días a partir de la fecha de entrega.</p>
-                <p>2. Problemas No Relacionados: La garantía cubre exclusivamente la pieza o el servicio específico detallado en este ticket. Si el equipo presenta una falla nueva y diferente (ej. se reparó la pantalla y luego falla la batería), esta no está cubierta.</p>
-                <p>3. No nos hacemos responsables por equipos abandonados después de 30 días de ser notificado para su retiro.</p>
-                <p>4. El cliente declara que el equipo es de su propiedad y no tiene reporte de robo.</p>
-                <p>5. Es indispensable presentar este ticket para retirar su equipo.</p>
+            <div className="text-center mt-4">
+                <p>¡Gracias por su confianza!</p>
             </div>
         </div>
-    )
+    );
 }
 
+// SECCIÓN 2: CONTROL INTERNO (NEGOCIO)
+export function InternalTicket({ repairJob }: RepairTicketProps) {
+    const total = repairJob.estimatedCost || 0;
+    const abono = repairJob.amountPaid || 0;
+    const saldo = Math.max(0, total - abono);
+    const date = repairJob.createdAt ? parseISO(repairJob.createdAt) : new Date();
+    const fecha = format(date, "dd/MM/yy", { locale: es });
+    const hora = format(date, "hh:mm a", { locale: es });
 
-export const handlePrintTicket = (props: RepairTicketProps, onError: (message: string) => void) => {
-    const ticketHtml = renderToString(<RepairTicket {...props} />);
-    const printWindow = window.open('', '_blank', 'width=300,height=500');
+    const checklistItems = [
+        ['Encendido', 'Cámaras'],
+        ['Carga/PIN', 'Audio/Mic'],
+        ['Touch/LCD', 'Botones'],
+        ['Señal/WiFi', 'Biometría']
+    ];
 
+    return (
+        <div className="text-black bg-white font-mono text-[10px] max-w-[215px] mx-auto">
+            <div className="text-center mb-2">
+                <h3 className="font-bold text-[11px] uppercase">CONTROL INTERNO: MARICHE MOVIL</h3>
+                <p className="text-[9px]">ID: {repairJob.id} | Fecha: {fecha} | Hora: {hora}</p>
+            </div>
+
+            <div className="border-t border-black pt-1 mb-2">
+                <p className="font-bold">📱 DATOS DEL SERVICIO</p>
+                <p><span className="font-bold">Cliente:</span> {repairJob.customerName} ({repairJob.customerID || 'N/A'})</p>
+                <p><span className="font-bold">Equipo:</span> {repairJob.deviceMake} {repairJob.deviceModel}</p>
+                <p><span className="font-bold">Falla:</span> {repairJob.reportedIssue}</p>
+                <p><span className="font-bold">Costo:</span> ${total.toFixed(2)} | <span className="font-bold">Abono:</span> ${abono.toFixed(2)} | <span className="font-bold">Saldo:</span> ${saldo.toFixed(2)}</p>
+            </div>
+
+            <div className="border-t border-black pt-1 mb-2">
+                <p className="font-bold mb-1">✅ CHECKLIST (ENTRADA vs SALIDA)</p>
+                <table className="w-full border-collapse text-[9px]">
+                    <thead>
+                        <tr className="border-b border-black">
+                            <th className="text-left py-0.5">Función</th>
+                            <th className="text-center py-0.5">E</th>
+                            <th className="text-center py-0.5">S</th>
+                            <th className="text-left py-0.5 pl-2 border-l border-black">Función</th>
+                            <th className="text-center py-0.5">E</th>
+                            <th className="text-center py-0.5">S</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {checklistItems.map(([f1, f2], idx) => (
+                            <tr key={idx} className="border-b border-gray-200">
+                                <td className="py-1">{f1}</td>
+                                <td className="text-center text-[8px] font-mono">[ ]</td>
+                                <td className="text-center text-[8px] font-mono">[ ]</td>
+                                <td className="py-1 pl-2 border-l border-black">{f2}</td>
+                                <td className="text-center text-[8px] font-mono">[ ]</td>
+                                <td className="text-center text-[8px] font-mono">[ ]</td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+                <p className="text-[7px] text-center mt-1 italic uppercase">E: Entrada (Al recibir) | S: Salida (Al entregar)</p>
+            </div>
+
+            {repairJob.devicePatternOrPassword && (
+                <div className="mb-2 p-1.5 bg-gray-100 border border-black rounded text-center">
+                    <p className="font-bold text-[9px] uppercase">Clave/Patrón:</p>
+                    <p className="text-sm font-bold">{repairJob.devicePatternOrPassword}</p>
+                </div>
+            )}
+
+            <div className="mb-3 space-y-1">
+                <p>Obs. Técnicas: ________________________________</p>
+                <p>________________________________________________</p>
+                <p>________________________________________________</p>
+                <p>________________________________________________</p>
+            </div>
+
+            <div className="border-t border-black pt-1 mb-3">
+                <p className="font-bold uppercase text-[8px]">✍️ 1. FIRMA DE RECEPCIÓN (AL DEJAR)</p>
+                <p className="text-[7.5px] leading-tight italic">"Declaro que el equipo es de mi propiedad y acepto el estado inicial registrado en la columna (E). Entiendo que tengo 7 días continuos para retirar el equipo tras la notificación, de lo contrario MARICHE MOVIL no se hace responsable."</p>
+                <div className="mt-4 border-b border-black w-3/4 mx-auto"></div>
+                <p className="text-center font-bold text-[8px] mt-1">Firma Cliente</p>
+            </div>
+
+            <div className="border-t border-black pt-1">
+                <p className="font-bold uppercase text-[8px]">✍️ 2. FIRMA DE ENTREGA (AL RETIRAR)</p>
+                <p className="text-[7.5px] leading-tight italic">"Recibo mi equipo reparado, probado y a total conformidad según la columna (S). Acepto que a partir de hoy inician mis 4 días de garantía bajo los términos del ticket."</p>
+                <div className="mt-4 border-b border-black w-3/4 mx-auto"></div>
+                <p className="text-center font-bold text-[8px] mt-1">Firma Cliente</p>
+            </div>
+        </div>
+    );
+}
+
+// SECCIÓN 3: ETIQUETA DE EQUIPO (PEGATINA)
+export function StickerTicket({ repairJob }: RepairTicketProps) {
+    const total = repairJob.estimatedCost || 0;
+    const abono = repairJob.amountPaid || 0;
+    const saldo = Math.max(0, total - abono);
+
+    return (
+        <div className="text-black bg-white font-mono text-[10px] max-w-[215px] mx-auto p-1">
+            <div className="border border-black p-2 space-y-0.5">
+                <p className="font-bold text-[11px]">ID: {repairJob.id}</p>
+                <p><span className="font-bold text-[9px]">Cliente:</span> {repairJob.customerName}</p>
+                <p><span className="font-bold text-[9px]">Modelo:</span> {repairJob.deviceMake} {repairJob.deviceModel}</p>
+                <p className="font-bold text-xs pt-1 border-t border-dotted border-black">SALDO: ${saldo.toFixed(2)}</p>
+            </div>
+        </div>
+    );
+}
+
+const printStyles = `
+    @media print {
+        @page { margin: 0; size: auto; }
+        body { margin: 0; padding: 10px; }
+    }
+    body { 
+        margin: 0; 
+        padding: 15px; 
+        font-family: monospace; 
+        background-color: #fff; 
+        color: #000;
+    }
+    .ticket-container { 
+        width: 58mm; 
+        margin: 0 auto; 
+        box-sizing: border-box; 
+    }
+    .text-center { text-align: center; }
+    .font-bold { font-weight: 700; }
+    .flex { display: flex; }
+    .justify-between { justify-content: space-between; }
+    .border-t { border-top: 1px solid #000; }
+    .border-b { border-bottom: 1px solid #000; }
+    .border-dashed { border-style: dashed !important; }
+    .border-dotted { border-style: dotted !important; }
+    .border { border: 1px solid #000; }
+    .border-gray-200 { border-color: #e5e7eb; }
+    .border-gray-400 { border-color: #9ca3af; }
+    .bg-gray-100 { background-color: #f3f4f6; }
+    .w-full { width: 100%; }
+    .w-3\\/4 { width: 75%; }
+    .mx-auto { margin-left: auto; margin-right: auto; }
+    .space-y-0\\.5 > * + * { margin-top: 0.125rem; }
+    .space-y-1 > * + * { margin-top: 0.25rem; }
+    .space-y-2 > * + * { margin-top: 0.5rem; }
+    .space-y-3 > * + * { margin-top: 0.75rem; }
+    .space-y-4 > * + * { margin-top: 1rem; }
+    .mb-2 { margin-bottom: 0.5rem; }
+    .mb-3 { margin-bottom: 0.75rem; }
+    .mb-4 { margin-bottom: 1rem; }
+    .my-4 { margin-top: 1rem; margin-bottom: 1rem; }
+    .mt-1 { margin-top: 0.125rem; }
+    .mt-2 { margin-top: 0.25rem; }
+    .mt-3 { margin-top: 0.5rem; }
+    .mt-4 { margin-top: 1rem; }
+    .p-0\\.5 { padding: 0.125rem; }
+    .p-1 { padding: 0.25rem; }
+    .p-2 { padding: 0.5rem; }
+    .pt-1 { padding-top: 0.25rem; }
+    .pt-2 { padding-top: 0.5rem; }
+    .pt-4 { padding-top: 1rem; }
+    .text-xs { font-size: 12px; }
+    .text-sm { font-size: 14px; }
+    .uppercase { text-transform: uppercase; }
+    .italic { font-style: italic; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border: none; padding: 2px; }
+    .border-l { border-left: 1px solid #000; }
+`;
+
+function createPrintWindow(html: string, title: string) {
+    const printWindow = window.open('', '_blank', 'width=300,height=600');
     if (printWindow) {
         printWindow.document.write(`
             <html>
                 <head>
-                    <title>Ticket de Reparación</title>
-                     <style>
-                        body { margin: 0; font-family: monospace; font-size: 10px; }
-                        .ticket-container { width: 58mm; padding: 2mm; box-sizing: border-box; }
-                        .text-black { color: #000; } .bg-white { background-color: #fff; } .p-2 { padding: 0.5rem; }
-                        .font-mono { font-family: monospace; } .text-xs { font-size: 0.75rem; line-height: 1rem; }
-                        .max-w-\\[215px\\] { max-width: 215px; } .mx-auto { margin-left: auto; margin-right: auto; }
-                        .text-center { text-align: center; } .mb-2 { margin-bottom: 0.5rem; } .my-2 { margin-top: 0.5rem; margin-bottom: 0.5rem; }
-                        .font-bold { font-weight: 700; } .text-sm { font-size: 0.875rem; line-height: 1.25rem; }
-                        .my-1 { margin-top: 0.25rem; margin-bottom: 0.25rem; } .border-dashed { border-style: dashed; } .border-t { border-top-width: 1px; }
-                        .border-black { border-color: #000; } .flex { display: flex; } .flex-1 { flex: 1 1 0%; }
-                        .w-1\\/4 { width: 25%; } .text-right { text-align: right; }
-                        .space-y-1 > :not([hidden]) ~ :not([hidden]) { margin-top: 0.25rem; }
-                        .break-words { overflow-wrap: break-word; } .justify-between { justify-content: space-between; }
-                        .text-destructive { color: hsl(var(--destructive)); }
-                        .mt-2 { margin-top: 0.5rem; } .mb-1 { margin-bottom: 0.25rem; } .mt-4 { margin-top: 1rem; } .pt-4 { padding-top: 1rem; }
-                        .font-semibold { font-weight: 600; } .text-\\[10px\\] { font-size: 10px; }
-                        .text-lg { font-size: 1.125rem; line-height: 1.75rem; } .tracking-wider { letter-spacing: 0.05em; }
-                        .pt-2 { padding-top: 0.5rem; }
-                        .text-left { text-align: left; }
-                        .list-disc { list-style-type: disc; } .list-inside { list-style-position: inside; }
-                        .mt-1 { margin-top: 0.25rem; }
-                    </style>
+                    <title>${title}</title>
+                    <style>${printStyles}</style>
                 </head>
                 <body>
-                    <div class="ticket-container">${ticketHtml}</div>
+                    <div class="ticket-container">${html}</div>
                     <script>
-                        window.onload = function() { window.print(); }
-                    <\/script>
+                        window.onload = function() {
+                            window.print();
+                            setTimeout(function() { window.close(); }, 500);
+                        }
+                    </script>
                 </body>
             </html>
         `);
         printWindow.document.close();
     } else {
-        onError("No se pudo abrir la ventana de impresión. Revisa si tu navegador está bloqueando las ventanas emergentes.");
+        throw new Error("No se pudo abrir la ventana de impresión.");
+    }
+}
+
+export const handlePrintCustomerTicket = (props: RepairTicketProps, onError: (message: string) => void) => {
+    try {
+        const html = renderToString(<CustomerTicket {...props} />);
+        createPrintWindow(html, `Nota Cliente - ${props.repairJob.id}`);
+    } catch (e: any) {
+        onError(e.message);
+    }
+};
+
+export const handlePrintInternalTicket = (props: RepairTicketProps, onError: (message: string) => void) => {
+    try {
+        const html = renderToString(<InternalTicket {...props} />);
+        createPrintWindow(html, `Control Interno - ${props.repairJob.id}`);
+    } catch (e: any) {
+        onError(e.message);
+    }
+};
+
+export const handlePrintStickerTicket = (props: RepairTicketProps, onError: (message: string) => void) => {
+    try {
+        const html = renderToString(<StickerTicket {...props} />);
+        createPrintWindow(html, `Etiqueta - ${props.repairJob.id}`);
+    } catch (e: any) {
+        onError(e.message);
+    }
+};
+
+export const handlePrintAllTickets = (props: RepairTicketProps, onError: (message: string) => void) => {
+    try {
+        const html = renderToString(
+            <>
+                <CustomerTicket {...props} />
+                <div className="my-4 border-t border-dashed border-black"></div>
+                <InternalTicket {...props} />
+                <div className="my-4 border-t border-dashed border-black"></div>
+                <StickerTicket {...props} />
+            </>
+        );
+        createPrintWindow(html, `Tickets Reparación - ${props.repairJob.id}`);
+    } catch (e: any) {
+        onError(e.message);
     }
 };

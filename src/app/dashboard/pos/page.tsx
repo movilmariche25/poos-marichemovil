@@ -1,5 +1,4 @@
 
-
 "use client";
 
 import { ProductGrid } from "@/components/pos/product-grid";
@@ -13,11 +12,12 @@ import { useRouter } from "next/navigation";
 import { useCollection, useFirebase, useMemoFirebase, deleteDocumentNonBlocking, setDocumentNonBlocking, addDocumentNonBlocking } from "@/firebase";
 import { collection, doc } from "firebase/firestore";
 import { Button } from "@/components/ui/button";
-import { ParkingSquare, Calculator } from "lucide-react";
+import { ParkingSquare, Calculator, Plus } from "lucide-react";
 import { HoldSaleDialog } from "@/components/pos/hold-sale-dialog";
 import { HeldSalesSheet } from "@/components/pos/held-sales-sheet";
 import { useCurrency } from "@/hooks/use-currency";
 import { PriceCalculatorDialog } from "@/components/tools/price-calculator-dialog";
+import { CustomItemDialog } from "@/components/pos/custom-item-dialog";
 
 function POSContent() {
     const { firestore, isUserLoading } = useFirebase();
@@ -49,8 +49,10 @@ function POSContent() {
             try {
                 const itemsToRestore: CartItem[] = JSON.parse(decodeURIComponent(restoredCartItems));
                 const restoredCart = itemsToRestore.map(item => {
+                    if (item.isCustom) return item; // Restore custom items as they are
+
                     const product = products.find(p => p.id === item.productId);
-                    if (!product) return null; // Or handle as an error
+                    if (!product) return null;
                     return {
                         productId: product.id!,
                         name: product.name,
@@ -67,10 +69,7 @@ function POSContent() {
                     deleteDocumentNonBlocking(saleRef);
                 }
 
-                // Clear URL params after restoring
                 router.replace('/dashboard/pos', undefined);
-
-
             } catch(e) {
                  toast({
                     variant: "destructive",
@@ -135,7 +134,7 @@ function POSContent() {
 
     const handleProductSelect = (product: Product) => {
         const availableStock = getAvailableStock(product);
-        if(availableStock <= 0 && !product.isCombo) { // Combos might have stock even if their own level is 0
+        if(availableStock <= 0 && !product.isCombo) {
             toast({
                 variant: "destructive",
                 title: "Sin Stock",
@@ -145,7 +144,7 @@ function POSContent() {
         }
 
         setCart(prevCart => {
-            const existingItem = prevCart.find(item => item.productId === product.id && !item.isRepair);
+            const existingItem = prevCart.find(item => item.productId === product.id && !item.isRepair && !item.isCustom);
             if (existingItem) {
                 const effectiveStock = product.isCombo ? availableStock : (product.stockLevel - (product.reservedStock || 0) - (product.damagedStock || 0));
                 if(existingItem.quantity >= effectiveStock) {
@@ -167,6 +166,22 @@ function POSContent() {
         });
     };
 
+    const handleAddCustomItem = (name: string, price: number, costPrice: number) => {
+        const customId = `custom-${Date.now()}`;
+        setCart(prev => [...prev, {
+            productId: customId,
+            name,
+            quantity: 1,
+            isCustom: true,
+            customPrice: price,
+            customCostPrice: costPrice
+        }]);
+        toast({
+            title: "Artículo Añadido",
+            description: `"${name}" añadido al carrito.`
+        });
+    }
+
     const handleTogglePromo = (productId: string) => {
         const product = products?.find(p => p.id === productId);
         if (!product || !product.promoPrice || product.promoPrice <= 0) {
@@ -184,7 +199,7 @@ function POSContent() {
                 return {
                     ...item,
                     isPromo: isPromo,
-                    isGift: false, // Cannot be a gift and a promo at the same time
+                    isGift: false,
                 };
             }
             return item;
@@ -201,7 +216,7 @@ function POSContent() {
                 return {
                     ...item,
                     isGift: isGift,
-                    isPromo: false, // Cannot be a gift and a promo at the same time
+                    isPromo: false,
                 };
             }
             return item;
@@ -212,13 +227,23 @@ function POSContent() {
         const cartItem = cart.find(item => item.productId === productId);
         if (cartItem?.isRepair) return; 
 
-        const product = products?.find(p => p.id === productId);
-        if(!product) return;
-
         if (quantity <= 0) {
             handleRemoveItem(productId);
             return;
         }
+
+        // Custom items don't have stock validation
+        if (cartItem?.isCustom) {
+            setCart(prevCart => prevCart.map(item => 
+                item.productId === productId
+                ? { ...item, quantity }
+                : item
+            ));
+            return;
+        }
+
+        const product = products?.find(p => p.id === productId);
+        if(!product) return;
 
         const availableStock = getAvailableStock(product);
         if(quantity > availableStock) {
@@ -253,7 +278,6 @@ function POSContent() {
 
     const handleClearCart = () => {
         if (activeRepairJob || cart.some(c => c.isRepair)) {
-            // Keep the repair item, remove everything else
             setCart(prevCart => prevCart.filter(item => item.isRepair));
             toast({
                 title: "Productos Eliminados",
@@ -299,6 +323,7 @@ function POSContent() {
                             <Calculator className="h-4 w-4" />
                         </Button>
                     </PriceCalculatorDialog>
+                    <CustomItemDialog onAddCustomItem={handleAddCustomItem} />
                     <HeldSalesSheet heldSales={heldSales || []} />
                     <HoldSaleDialog onHoldSale={handleHoldSale} disabled={cart.length === 0 || cart.some(c => c.isRepair)}>
                         <Button variant="outline">

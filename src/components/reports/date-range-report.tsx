@@ -51,8 +51,6 @@ export function DateRangeReport({ sales, products, reconciliations, isLoading }:
         
         const filteredReconciliations = reconciliations.filter(r => {
              const reconDate = new Date(r.date);
-             // The date in reconciliation is 'yyyy-MM-dd', so we need to be careful with timezone
-             // We'll create a date range that is inclusive of the start and end days at UTC
              const fromUTC = startOfDay(date.from!);
              const toUTC = endOfDay(date.to || date.from!);
              return reconDate >= fromUTC && reconDate <= toUTC;
@@ -63,6 +61,9 @@ export function DateRangeReport({ sales, products, reconciliations, isLoading }:
         const totalProfit = filteredSales.reduce((totalProfit, sale) => {
             const costOfGoods = sale.items.reduce((cost, item) => {
                 if (item.isRepair) return cost;
+                if (item.isCustom) {
+                    return cost + ((item.customCostPrice || 0) * item.quantity);
+                }
                 const product = products.find(p => p.id === item.productId);
                 return cost + (product ? product.costPrice * item.quantity : 0);
             }, 0);

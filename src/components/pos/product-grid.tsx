@@ -8,7 +8,7 @@ import { ScrollArea } from "../ui/scroll-area";
 import { useCurrency } from "@/hooks/use-currency";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "../ui/skeleton";
-import { TicketPercent, Search, PackagePlus } from "lucide-react";
+import { TicketPercent, Search, PackagePlus, Lock, Percent } from "lucide-react";
 import { Input } from "../ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "../ui/button";
@@ -24,7 +24,7 @@ const ITEMS_PER_PAGE = 25;
 
 export function ProductGrid({ products, onProductSelect, isLoading }: ProductGridProps) {
   const [searchTerm, setSearchTerm] = useState("");
-  const { format, getSymbol, getDynamicPrice } = useCurrency();
+  const { format, getSymbol, getFinalPrice } = useCurrency();
   const [currentPage, setCurrentPage] = useState(1);
 
   const categories = useMemo(() => {
@@ -46,7 +46,6 @@ export function ProductGrid({ products, onProductSelect, isLoading }: ProductGri
     ).sort((a, b) => a.name.localeCompare(b.name));
   }, [products, activeCategory, searchTerm]);
 
-  // Reset page to 1 when filters (category or search term) change.
   useEffect(() => {
     setCurrentPage(1);
   }, [activeCategory, searchTerm]);
@@ -125,9 +124,8 @@ export function ProductGrid({ products, onProductSelect, isLoading }: ProductGri
                     const promoPrice = (typeof product.promoPrice === 'number' && product.promoPrice > 0) ? product.promoPrice : 0;
                     const hasPromo = promoPrice > 0;
                     
-                    const dynamicPrice = getDynamicPrice(product.costPrice);
-                    
-                    const displayPrice = hasPromo ? promoPrice : dynamicPrice;
+                    const basePrice = getFinalPrice(product);
+                    const displayPrice = hasPromo ? promoPrice : basePrice;
 
                     return (
                         <Card
@@ -141,6 +139,8 @@ export function ProductGrid({ products, onProductSelect, isLoading }: ProductGri
                             <CardHeader className="p-2">
                                 <CardTitle className="text-sm font-medium leading-tight h-10 flex items-start gap-2">
                                   {product.isCombo && <PackagePlus className="h-4 w-4 text-muted-foreground flex-shrink-0 mt-0.5" title="Combo"/>}
+                                  {product.isFixedPrice && <Lock className="h-3 w-3 text-amber-500 flex-shrink-0 mt-1" title="Precio Fijo" />}
+                                  {product.hasCustomMargin && !product.isFixedPrice && <Percent className="h-3 w-3 text-blue-500 flex-shrink-0 mt-1" title={`Margen Indiv: ${product.customMargin}%`} />}
                                   <span>{product.name}</span>
                                 </CardTitle>
                                 {product.compatibleModels && product.compatibleModels.length > 0 && (

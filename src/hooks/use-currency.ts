@@ -1,9 +1,8 @@
 
-
 "use client";
 
 import { useDoc, useFirebase, useMemoFirebase } from "@/firebase";
-import type { Currency, AppSettings } from "@/lib/types";
+import type { Currency, AppSettings, Product } from "@/lib/types";
 import { doc } from "firebase/firestore";
 import { useCallback } from "react";
 
@@ -23,8 +22,6 @@ export const useCurrency = () => {
     const format = useCallback((value: number, targetCurrency?: Currency) => {
         const c = targetCurrency || currency;
         
-        let displayValue = value;
-        
         // Using 'de-DE' locale to enforce comma for decimals and dot for thousands
         const formatter = new Intl.NumberFormat('de-DE', {
             style: 'decimal',
@@ -32,7 +29,7 @@ export const useCurrency = () => {
             maximumFractionDigits: 2,
         });
 
-        return formatter.format(displayValue);
+        return formatter.format(value);
     }, [currency]);
 
     const getSymbol = useCallback((targetCurrency?: Currency) => {
@@ -47,24 +44,42 @@ export const useCurrency = () => {
         return value;
     }, [bcvRate]);
 
-    const getDynamicPrice = useCallback((costPrice: number) => {
+    const getDynamicPrice = useCallback((costPrice: number, overrideMargin?: number) => {
         if (!settings || costPrice <= 0) return 0;
+        const marginToUse = typeof overrideMargin === 'number' ? overrideMargin : profitMargin;
         // Precio_Final_BCV = ((Costo_USD * Tasa_Reposicion) * (1 + Margen_Ganancia)) / Tasa_BCV
         const costInBs = costPrice * parallelRate;
-        const priceWithProfitInBs = costInBs * (1 + profitMargin / 100);
+        const priceWithProfitInBs = costInBs * (1 + marginToUse / 100);
         const finalPriceInBcvUsd = priceWithProfitInBs / bcvRate;
         return parseFloat(finalPriceInBcvUsd.toFixed(2));
     }, [settings, parallelRate, profitMargin, bcvRate]);
+
+    /**
+     * getFinalPrice: El resolvedor maestro de precios.
+     * Prioridad: Precio Fijo > Margen Individual > Margen Global.
+     */
+    const getFinalPrice = useCallback((product: Product) => {
+        if (product.isFixedPrice && typeof product.fixedPrice === 'number' && product.fixedPrice > 0) {
+            return product.fixedPrice;
+        }
+        
+        const marginToUse = (product.hasCustomMargin && typeof product.customMargin === 'number')
+            ? product.customMargin
+            : profitMargin;
+            
+        return getDynamicPrice(product.costPrice, marginToUse);
+    }, [getDynamicPrice, profitMargin]);
 
     return {
         format,
         getSymbol,
         convert,
         getDynamicPrice,
+        getFinalPrice,
         currency,
-        bcvRate, // Exposed for display
-        parallelRate, // Exposed for calculation
-        profitMargin, // Exposed for calculation
+        bcvRate, 
+        parallelRate,
+        profitMargin,
         isLoading,
         settings
     };

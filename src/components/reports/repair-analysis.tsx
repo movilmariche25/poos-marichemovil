@@ -28,7 +28,8 @@ export function RepairAnalysis({ repairJobs, products, isLoading }: RepairAnalys
     const { analysisData, categories } = useMemo(() => {
         if (!repairJobs || !products) return { analysisData: [], categories: ["Todos"] };
 
-        const completedJobs = repairJobs.filter(job => job.status === 'Completado');
+        // Consider parts as "used" if the job is paid or marked delivered
+        const completedJobs = repairJobs.filter(job => job.status === 'Completado' || job.status === 'Pagado' || job.isPaid);
         
         const partUsageMap = new Map<string, PartUsage>();
 

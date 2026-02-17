@@ -24,7 +24,6 @@ import {
 import { AppLogo } from '@/components/icons';
 import { cn } from '@/lib/utils';
 import { Separator } from './ui/separator';
-import { PwaInstallButton } from './pwa-install-button';
 
 const navItems = [
   { href: '/dashboard', icon: LayoutDashboard, label: 'Panel de control' },
@@ -72,9 +71,6 @@ export function SidebarNav() {
       <SidebarFooter className='mt-auto'>
         <Separator className="my-2 bg-sidebar-border/50"/>
         <SidebarMenu>
-            <SidebarMenuItem>
-                 <PwaInstallButton />
-            </SidebarMenuItem>
             <SidebarMenuItem>
                 <SidebarMenuButton asChild tooltip={{children: 'Configuración'}} isActive={pathname === '/dashboard/settings'}>
                     <Link href="/dashboard/settings">

@@ -1,5 +1,4 @@
 
-
 "use client"
 
 import type { ColumnDef } from "@tanstack/react-table"
@@ -13,7 +12,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { MoreHorizontal, Edit, Trash2, DollarSign, Printer, Eye, ArrowUpDown } from "lucide-react"
+import { MoreHorizontal, Edit, Trash2, DollarSign, Printer, Eye, ArrowUpDown, Tag, Files } from "lucide-react"
 import { Badge } from "../ui/badge"
 import { useToast } from "@/hooks/use-toast"
 import {
@@ -30,22 +29,16 @@ import { format, parseISO, addDays } from "date-fns"
 import { es } from "date-fns/locale"
 import { useCurrency } from "@/hooks/use-currency"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select"
-import { useFirebase, updateDocumentNonBlocking, deleteDocumentNonBlocking } from "@/firebase"
-import { doc, writeBatch, getDoc, runTransaction } from "firebase/firestore"
-import { handlePrintTicket } from "./repair-ticket"
+import { useFirebase, updateDocumentNonBlocking } from "@/firebase"
+import { doc, runTransaction } from "firebase/firestore"
+import { handlePrintCustomerTicket, handlePrintInternalTicket, handlePrintStickerTicket, handlePrintAllTickets } from "./repair-ticket"
 import { AdminAuthDialog } from "../admin-auth-dialog"
 import { useState } from "react"
 import { cn } from "@/lib/utils"
 import { useRouter } from "next/navigation"
 import { RepairFormDialog } from "./repair-form-dialog"
 
-const statusColors: Record<RepairStatus, "default" | "secondary" | "destructive" | "outline"> = {
-    'Pendiente': 'destructive',
-    'Completado': 'secondary',
-};
-
-const repairStatuses: RepairStatus[] = ['Pendiente', 'Completado'];
-
+const repairStatuses: RepairStatus[] = ['Pendiente', 'Pagado', 'Completado'];
 
 const ActionsCell = ({ repairJob }: { repairJob: RepairJob }) => {
     const { toast } = useToast();
@@ -69,7 +62,6 @@ const ActionsCell = ({ repairJob }: { repairJob: RepairJob }) => {
             await runTransaction(firestore, async (transaction) => {
                 const jobRef = doc(firestore, 'repair_jobs', repairJob.id!);
 
-                // Return parts to stock differently based on whether the job was paid for.
                 if (repairJob.reservedParts && repairJob.reservedParts.length > 0) {
                     for (const part of repairJob.reservedParts) {
                         const productRef = doc(firestore, 'products', part.productId);
@@ -79,14 +71,9 @@ const ActionsCell = ({ repairJob }: { repairJob: RepairJob }) => {
                             const productData = productDoc.data();
                             
                             if (repairJob.isPaid) {
-                                // The job was paid, so parts were consumed. 
-                                // Their stockLevel was decremented, and reservedStock was cleared.
-                                // We need to return the part to the total stock count.
                                 const newStockLevel = (productData.stockLevel || 0) + part.quantity;
                                 transaction.update(productRef, { stockLevel: newStockLevel });
                             } else {
-                                // The job was not paid, parts were only reserved.
-                                // We just need to decrement the reservedStock count.
                                 const newReservedStock = (productData.reservedStock || 0) - part.quantity;
                                 transaction.update(productRef, { reservedStock: Math.max(0, newReservedStock) });
                             }
@@ -115,13 +102,27 @@ const ActionsCell = ({ repairJob }: { repairJob: RepairJob }) => {
         }
     }
     
-    const onPrint = (variant: 'client' | 'internal') => {
-        handlePrintTicket({ repairJob, variant }, (error) => {
-             toast({
-                variant: "destructive",
-                title: "Error de Impresión",
-                description: error,
-            })
+    const onPrintCustomer = () => {
+        handlePrintCustomerTicket({ repairJob }, (error) => {
+             toast({ variant: "destructive", title: "Error de Impresión", description: error })
+        });
+    }
+
+    const onPrintInternal = () => {
+        handlePrintInternalTicket({ repairJob }, (error) => {
+             toast({ variant: "destructive", title: "Error de Impresión", description: error })
+        });
+    }
+
+    const onPrintSticker = () => {
+        handlePrintStickerTicket({ repairJob }, (error) => {
+             toast({ variant: "destructive", title: "Error de Impresión", description: error })
+        });
+    }
+
+    const onPrintAll = () => {
+        handlePrintAllTickets({ repairJob }, (error) => {
+             toast({ variant: "destructive", title: "Error de Impresión", description: error })
         });
     }
 
@@ -152,20 +153,26 @@ const ActionsCell = ({ repairJob }: { repairJob: RepairJob }) => {
                     </RepairFormDialog>
                     
                     <DropdownMenuSeparator />
-                    <DropdownMenuLabel>Imprimir</DropdownMenuLabel>
-                    <DropdownMenuItem onSelect={() => onPrint('client')}>
-                        <Printer className="mr-2 h-4 w-4" />
-                        Ticket (Cliente)
+                    <DropdownMenuItem onSelect={onPrintAll}>
+                        <Files className="mr-2 h-4 w-4" />
+                        Imprimir Todo (3 tickets)
                     </DropdownMenuItem>
-                    <DropdownMenuItem onSelect={() => onPrint('internal')}>
+                    <DropdownMenuItem onSelect={onPrintCustomer}>
                         <Printer className="mr-2 h-4 w-4" />
-                        Copia (Interna)
+                        Imprimir Nota Cliente
                     </DropdownMenuItem>
-
+                    <DropdownMenuItem onSelect={onPrintInternal}>
+                        <Printer className="mr-2 h-4 w-4" />
+                        Imprimir Control Interno
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={onPrintSticker}>
+                        <Tag className="mr-2 h-4 w-4" />
+                        Imprimir Etiqueta
+                    </DropdownMenuItem>
 
                     <DropdownMenuSeparator />
                     <AdminAuthDialog onAuthorized={() => setIsDeleteDialogOpen(true)}>
-                        <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={(e) => e.preventDefault()}>
+                        <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={(e) => { e.preventDefault(); }}>
                             <Trash2 className="mr-2 h-4 w-4" />
                             Eliminar
                         </DropdownMenuItem>
@@ -173,7 +180,6 @@ const ActionsCell = ({ repairJob }: { repairJob: RepairJob }) => {
                 </DropdownMenuContent>
             </DropdownMenu>
 
-            {/* Alert for deleting */}
              <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
                 <AlertDialogContent>
                     <AlertDialogHeader>
@@ -210,7 +216,7 @@ const StatusCell = ({ repairJob }: { repairJob: RepairJob }) => {
             updateData.completedAt = completionDate.toISOString();
             updateData.warrantyEndDate = addDays(completionDate, 4).toISOString();
              toast({
-                title: 'Trabajo Completado y Garantía Iniciada',
+                title: 'Trabajo Entregado y Garantía Iniciada',
                 description: `La garantía de 4 días para la reparación de ${repairJob.customerName} ha comenzado.`,
             });
         }
@@ -223,22 +229,22 @@ const StatusCell = ({ repairJob }: { repairJob: RepairJob }) => {
     }
 
     const status: RepairStatus = repairJob.status;
-    const isPaid = repairJob.isPaid;
     
     let badgeVariant: "default" | "secondary" | "destructive" | "outline" = 'secondary';
     let badgeClassName = '';
 
     if (status === 'Completado') {
         badgeVariant = 'secondary';
-        if (isPaid) {
-            badgeClassName = 'bg-green-500 text-white hover:bg-green-600';
-        }
+        badgeClassName = 'bg-green-500 text-white hover:bg-green-600';
+    } else if (status === 'Pagado') {
+        badgeVariant = 'default';
+        badgeClassName = 'bg-blue-500 text-white hover:bg-blue-600';
     } else { // Pendiente
         badgeVariant = 'destructive';
     }
     
     if (status === 'Completado') {
-        return <Badge variant={badgeVariant} className={cn(badgeClassName)}>{repairJob.isPaid ? 'Completado y Pagado' : 'Completado'}</Badge>;
+        return <Badge variant={badgeVariant} className={cn(badgeClassName)}>{repairJob.isPaid ? 'Entregado y Pagado' : 'Entregado'}</Badge>;
     }
 
 

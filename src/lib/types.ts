@@ -1,5 +1,4 @@
 
-
 import type { Timestamp } from "firebase/firestore";
 
 export type ComboItem = {
@@ -23,6 +22,10 @@ export type Product = {
   isCombo?: boolean;
   comboItems?: ComboItem[];
   isGiftable?: boolean;
+  isFixedPrice?: boolean;
+  fixedPrice?: number;
+  hasCustomMargin?: boolean;
+  customMargin?: number;
 };
 
 export type ReservedPart = {
@@ -32,7 +35,7 @@ export type ReservedPart = {
   costPrice: number;
 }
 
-export type RepairStatus = 'Pendiente' | 'Completado';
+export type RepairStatus = 'Pendiente' | 'Pagado' | 'Completado';
 
 export type RepairJob = {
   id?: string;
@@ -66,6 +69,9 @@ export type CartItem = {
   isRepair?: boolean;
   isPromo?: boolean;
   isGift?: boolean;
+  isCustom?: boolean;
+  customPrice?: number;
+  customCostPrice?: number;
 };
 
 export type HeldSale = {
@@ -85,7 +91,7 @@ export type Payment = {
 
 export type Sale = {
   id?: string;
-  items: (CartItem & { price: number })[]; // Price is stored at checkout time
+  items: (CartItem & { price: number })[] | any[]; // Added any[] for legacy compatibility
   repairJobId?: string;
   consumedParts?: ReservedPart[];
   subtotal: number;
@@ -132,5 +138,6 @@ export type AppSettings = {
     bcvRate: number; // Tasa Oficial
     parallelRate: number; // Tasa de Reposicion
     profitMargin: number; // Margen de Ganancia
+    autoUpdateBcv?: boolean; // Habilitar actualización automática vía API
     lastUpdated?: string; // ISO 8601 date string
 };

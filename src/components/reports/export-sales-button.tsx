@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState } from "react";
@@ -70,6 +71,8 @@ export function ExportSalesButton({ sales, products, repairJobs }: ExportSalesBu
                     productName = `Reparación (${mainPart.productName}): ${item.name}`;
                     costPrice = mainPart.costPrice;
                 }
+            } else if (item.isCustom) {
+                costPrice = item.customCostPrice || 0;
             } else {
                 const product = products.find(p => p.id === item.productId);
                 costPrice = product?.costPrice || 0;

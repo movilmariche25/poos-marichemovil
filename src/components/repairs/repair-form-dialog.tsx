@@ -32,10 +32,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { useCurrency } from "@/hooks/use-currency";
 import { Checkbox } from "../ui/checkbox";
 import { Label } from "../ui/label";
-import { useFirebase, setDocumentNonBlocking, addDocumentNonBlocking, useCollection, useMemoFirebase } from "@/firebase";
-import { collection, doc, writeBatch, query, where, getDocs, getDoc, runTransaction } from "firebase/firestore";
-import { handlePrintTicket } from "./repair-ticket";
-import { AlertCircle, Banknote, CreditCard, DollarSign, Info, Landmark, Printer, Search, Smartphone, TicketPercent, UserSearch } from "lucide-react";
+import { useFirebase, useCollection, useMemoFirebase } from "@/firebase";
+import { collection, doc, query, where, getDocs, runTransaction } from "firebase/firestore";
+import { handlePrintCustomerTicket, handlePrintInternalTicket, handlePrintAllTickets } from "./repair-ticket";
+import { AlertCircle, Banknote, CreditCard, DollarSign, Landmark, Printer, Search, Smartphone, TicketPercent, UserSearch, PlusCircle } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "../ui/command";
 import { format, addDays } from "date-fns";
@@ -43,9 +43,10 @@ import { useDebounce } from "use-debounce";
 import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
 import { es } from "date-fns/locale";
 import { cn } from "@/lib/utils";
+import { ProductFormDialog } from "../inventory/product-form-dialog";
 
 
-const repairStatuses: RepairStatus[] = ['Pendiente', 'Completado'];
+const repairStatuses: RepairStatus[] = ['Pendiente', 'Pagado', 'Completado'];
 const initialChecklistItems = [
     { id: 'screen_scratched', label: 'Pantalla Rayada' },
     { id: 'screen_broken', label: 'Pantalla Rota' },
@@ -78,6 +79,7 @@ const formSchema = z.object({
   deviceMake: z.string().min(2, "La marca del dispositivo es obligatoria."),
   deviceModel: z.string().min(1, "El modelo del dispositivo es obligatorio."),
   deviceImei: z.string().optional(),
+  devicePatternOrPassword: z.string().optional(),
   reportedIssue: z.string().min(5, "La descripción del problema es obligatoria."),
   initialConditionsChecklist: z.array(z.string()).optional(),
   estimatedCost: z.coerce.number().min(0),
@@ -85,7 +87,6 @@ const formSchema = z.object({
   status: z.enum(repairStatuses),
   notes: z.string().optional(),
   reservedParts: z.array(reservedPartSchema).optional(),
-  // New fields for abono
   hasNewAbono: z.boolean().optional(),
   newAbonoAmount: z.coerce.number().optional(),
   newAbonoPaymentMethod: z.custom<PaymentMethod>().optional(),
@@ -143,8 +144,8 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
     resolver: zodResolver(formSchema),
     defaultValues: {
       customerName: "", customerPhone: "", customerID: "", customerAddress: "",
-      deviceMake: "", deviceModel: "", deviceImei: "", reportedIssue: "",
-      initialConditionsChecklist: [], estimatedCost: 0,
+      deviceMake: "", deviceModel: "", deviceImei: "", devicePatternOrPassword: "",
+      reportedIssue: "", initialConditionsChecklist: [], estimatedCost: 0,
       isPaid: false, status: "Pendiente", notes: "", reservedParts: [],
       hasNewAbono: false, newAbonoAmount: 0, newAbonoReference: "",
     },
@@ -154,7 +155,6 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
   const customerNameValue = form.watch('customerName');
   const [debouncedCustomerId] = useDebounce(customerIdValue, 500);
 
-  // New watchers for abono UI improvement
   const newAbonoAmountValue = form.watch('newAbonoAmount');
   const newAbonoPaymentMethodValue = form.watch('newAbonoPaymentMethod');
   const isBsAbono = newAbonoPaymentMethodValue && paymentMethodOptions.find(o => o.value === newAbonoPaymentMethodValue)?.isBs;
@@ -167,7 +167,7 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
             return;
         }
 
-        const duplicate = allRepairJobs.find(
+        const duplicate = (allRepairJobs || []).find(
             job => job.customerID === debouncedCustomerId && job.customerName.toLowerCase() !== customerNameValue.toLowerCase()
         );
 
@@ -284,6 +284,7 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
                 customerID: repairJob.customerID ?? "",
                 customerAddress: repairJob.customerAddress ?? "",
                 deviceImei: repairJob.deviceImei ?? "",
+                devicePatternOrPassword: repairJob.devicePatternOrPassword ?? "",
                 initialConditionsChecklist: repairJob.initialConditionsChecklist || [],
                 notes: repairJob.notes ?? "",
                 estimatedCost: repairJob.estimatedCost || 0,
@@ -300,7 +301,7 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
         } else {
             form.reset({
                 customerName: "", customerPhone: "", customerID: "", customerAddress: "",
-                deviceMake: "", deviceModel: "", deviceImei: "", reportedIssue: "",
+                deviceMake: "", deviceModel: "", deviceImei: "", devicePatternOrPassword: "", reportedIssue: "",
                 initialConditionsChecklist: [], estimatedCost: 0,
                 isPaid: false, status: "Pendiente", notes: "", reservedParts: [],
                 hasNewAbono: false, newAbonoAmount: 0, newAbonoReference: "",
@@ -309,13 +310,15 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
     }
   }, [repairJob, form, products, open]);
   
-  const onPrint = (job: RepairJob, variant: 'client' | 'internal') => {
-    handlePrintTicket({ repairJob: job, variant }, (error) => {
-      toast({
-        variant: "destructive",
-        title: "Error de Impresión",
-        description: error,
-      });
+  const onPrintCustomer = (job: RepairJob) => {
+    handlePrintCustomerTicket({ repairJob: job }, (error) => {
+      toast({ variant: "destructive", title: "Error de Impresión", description: error });
+    });
+  };
+
+  const onPrintInternal = (job: RepairJob) => {
+    handlePrintInternalTicket({ repairJob: job }, (error) => {
+      toast({ variant: "destructive", title: "Error de Impresión", description: error });
     });
   };
 
@@ -327,20 +330,12 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
     if (!firestore) return;
 
     if (duplicateIdError) {
-        toast({
-            variant: "destructive",
-            title: "Cédula Duplicada",
-            description: "Por favor, corrige la cédula o busca al cliente existente."
-        });
+        toast({ variant: "destructive", title: "Cédula Duplicada", description: "Por favor, corrige la cédula o busca al cliente existente." });
         return;
     }
     
     if (!values.reservedParts || values.reservedParts.length === 0) {
-        toast({
-            variant: "destructive",
-            title: "Pieza Principal Requerida",
-            description: "Debes seleccionar una pieza principal para la reparación antes de guardar."
-        });
+        toast({ variant: "destructive", title: "Pieza Principal Requerida", description: "Debes seleccionar una pieza principal para la reparación antes de guardar." });
         return;
     }
 
@@ -349,7 +344,6 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
             const jobId = repairJob?.id || generateJobId();
             const jobRef = doc(firestore, 'repair_jobs', jobId);
 
-            // --- GATHER IDs & INITIAL READ ---
             let existingJobData: RepairJob | null = null;
             if (repairJob) {
                 const jobDoc = await transaction.get(jobRef);
@@ -362,18 +356,15 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
             const newParts = values.reservedParts || [];
 
             const stockDeltas = new Map<string, number>();
-            // Parts to be un-reserved
             for (const oldPart of oldParts) {
                 stockDeltas.set(oldPart.productId, (stockDeltas.get(oldPart.productId) || 0) - oldPart.quantity);
             }
-            // Parts to be reserved
             for (const newPart of newParts) {
                 stockDeltas.set(newPart.productId, (stockDeltas.get(newPart.productId) || 0) + newPart.quantity);
             }
             
             const productIdsToRead = Array.from(stockDeltas.keys()).filter(id => stockDeltas.get(id) !== 0);
 
-            // --- PHASE 1: ALL READS ---
             const productDocs = productIdsToRead.length > 0 
                 ? await Promise.all(productIdsToRead.map(id => transaction.get(doc(firestore, "products", id))))
                 : [];
@@ -389,9 +380,6 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
                 productDataMap.set(productIdsToRead[i], productDoc.data() as Product);
             }
 
-            // --- PHASE 2: ALL WRITES ---
-            
-            // Apply inventory updates
             for (const [productId, delta] of stockDeltas.entries()) {
                 if (delta === 0) continue;
 
@@ -399,18 +387,17 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
                 const productRef = doc(firestore, "products", productId);
                 const currentReserved = productData.reservedStock || 0;
 
-                if (delta > 0) { // New or increased reservation
+                if (delta > 0) { 
                     const availableStock = productData.stockLevel - currentReserved;
                     if (availableStock < delta) {
                         throw new Error(`Stock insuficiente para "${productData.name}". Solo hay ${availableStock} disponibles para reservar.`);
                     }
                     transaction.update(productRef, { reservedStock: currentReserved + delta });
-                } else { // Decreased or removed reservation
-                    transaction.update(productRef, { reservedStock: Math.max(0, currentReserved + delta) }); // delta is negative
+                } else { 
+                    transaction.update(productRef, { reservedStock: Math.max(0, currentReserved + delta) }); 
                 }
             }
             
-            // Handle new abono (payment)
             let newAbonoAmountUSD = 0;
             if (values.hasNewAbono && values.newAbonoAmount && values.newAbonoAmount > 0 && values.newAbonoPaymentMethod) {
                 const saleId = generateSaleId();
@@ -443,7 +430,6 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
                 transaction.set(saleRef, newSaleData);
             }
 
-            // Update the repair job itself
             const currentAmountPaid = existingJobData?.amountPaid || 0;
             const wasCompleted = existingJobData?.status === 'Completado';
             const isNowCompleted = values.status === 'Completado';
@@ -467,18 +453,26 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
             
             if (existingJobData) {
                 transaction.set(jobRef, finalJobData, { merge: true });
+                return { ...existingJobData, ...finalJobData }; 
             } else {
                 const newJobPayload = { ...finalJobData, id: jobId, createdAt: new Date().toISOString() };
                 transaction.set(jobRef, newJobPayload);
-                return newJobPayload; // Return for printing
+                return newJobPayload; 
             }
         });
         
         if (newJobDataForPrint) {
-            toast({ title: "Trabajo de Reparación Creado", description: `Nuevo trabajo para ${values.customerName} ha sido registrado.` });
-            onPrint(newJobDataForPrint as RepairJob, 'client');
-        } else {
-            toast({ title: "Trabajo de Reparación Actualizado", description: `El trabajo para ${values.customerName} ha sido actualizado.` });
+            toast({ title: "Trabajo Guardado", description: `El trabajo para ${values.customerName} ha sido procesado.` });
+            
+            // Si es una NUEVA reparación, imprimir TODO el paquete automáticamente
+            if (!repairJob) {
+                handlePrintAllTickets({ repairJob: newJobDataForPrint as RepairJob }, (error) => {
+                    toast({ variant: "destructive", title: "Error de Impresión", description: error });
+                });
+            } else {
+                // Si es solo una edición, imprimir la nota de cliente por defecto
+                onPrintCustomer(newJobDataForPrint as RepairJob);
+            }
         }
         setOpen(false);
 
@@ -497,6 +491,7 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
   const hasNewAbono = form.watch('hasNewAbono');
 
   return (
+    <Form {...form}>
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>{children}</DialogTrigger>
       <DialogContent className="sm:max-w-2xl">
@@ -506,7 +501,6 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
             {isReadOnly ? 'Este trabajo ya fue completado y pagado.' : 'Rellena los detalles para el trabajo de reparación.'}
           </DialogDescription>
         </DialogHeader>
-        <Form {...form}>
             <form 
                 onSubmit={form.handleSubmit(onSubmit)} 
                 className="space-y-4 max-h-[70vh] overflow-y-auto pr-4"
@@ -616,6 +610,13 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
                     <FormField control={form.control} name="deviceImei" render={({ field }) => (
                         <FormItem className="col-span-2"><FormLabel>IMEI / Serie (Opcional)</FormLabel><FormControl><Input placeholder="123456789012345" {...field} /></FormControl><FormMessage /></FormItem>
                     )}/>
+                    <FormField control={form.control} name="devicePatternOrPassword" render={({ field }) => (
+                        <FormItem className="col-span-2">
+                            <FormLabel>Patrón o Contraseña (Opcional)</FormLabel>
+                            <FormControl><Input placeholder="Ej: 1234 o Patrón en L" {...field} /></FormControl>
+                            <FormMessage />
+                        </FormItem>
+                    )}/>
                     {warrantyInfo && (
                         <Alert variant="destructive" className="col-span-2">
                             <AlertCircle className="h-4 w-4" />
@@ -680,42 +681,50 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
                              <div className="flex-grow p-2 h-10 border rounded-md bg-muted text-sm flex items-center">
                                 <span className="truncate">{mainPart ? mainPart.name : "Ninguna seleccionada"}</span>
                             </div>
-                            <Popover open={partsPopoverOpen} onOpenChange={setPartsPopoverOpen}>
-                                <PopoverTrigger asChild>
-                                     <Button type="button" variant="outline" disabled={isReadOnly}>
-                                        Cambiar
+                            <div className="flex items-center gap-1 shrink-0">
+                                <Popover open={partsPopoverOpen} onOpenChange={setPartsPopoverOpen}>
+                                    <PopoverTrigger asChild>
+                                         <Button type="button" variant="outline" disabled={isReadOnly}>
+                                            <Search className="h-4 w-4 mr-2" />
+                                            Cambiar
+                                        </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-[300px] p-0">
+                                        <Command>
+                                            <CommandInput placeholder="Buscar pieza..." />
+                                            <CommandList>
+                                            <CommandEmpty>No se encontraron piezas.</CommandEmpty>
+                                            <CommandGroup>
+                                                {(products || []).map((product) => {
+                                                    const availableStock = product.stockLevel - (product.reservedStock || 0);
+                                                    return (
+                                                        <CommandItem
+                                                            key={product.id}
+                                                            value={product.name}
+                                                            onSelect={() => {
+                                                                setMainPart(product);
+                                                                setUsePromoPrice(false); 
+                                                                setPartsPopoverOpen(false);
+                                                            }}
+                                                            disabled={availableStock <= 0}
+                                                            className="flex justify-between"
+                                                        >
+                                                            <span>{product.name}</span>
+                                                            <span className="text-xs text-muted-foreground">Disp: {availableStock}</span>
+                                                        </CommandItem>
+                                                    )
+                                                })}
+                                            </CommandGroup>
+                                            </CommandList>
+                                        </Command>
+                                    </PopoverContent>
+                                </Popover>
+                                <ProductFormDialog productCount={products?.length || 0}>
+                                    <Button type="button" variant="outline" size="icon" disabled={isReadOnly} title="Añadir Nueva Pieza al Inventario">
+                                        <PlusCircle className="h-4 w-4" />
                                     </Button>
-                                </PopoverTrigger>
-                                <PopoverContent className="w-[300px] p-0">
-                                    <Command>
-                                        <CommandInput placeholder="Buscar pieza..." />
-                                        <CommandList>
-                                        <CommandEmpty>No se encontraron piezas.</CommandEmpty>
-                                        <CommandGroup>
-                                            {(products || []).map((product) => {
-                                                const availableStock = product.stockLevel - (product.reservedStock || 0);
-                                                return (
-                                                    <CommandItem
-                                                        key={product.id}
-                                                        value={product.name}
-                                                        onSelect={() => {
-                                                            setMainPart(product);
-                                                            setUsePromoPrice(false); // Reset promo on new part selection
-                                                            setPartsPopoverOpen(false);
-                                                        }}
-                                                        disabled={availableStock <= 0}
-                                                        className="flex justify-between"
-                                                    >
-                                                        <span>{product.name}</span>
-                                                        <span className="text-xs text-muted-foreground">Disp: {availableStock}</span>
-                                                    </CommandItem>
-                                                )
-                                            })}
-                                        </CommandGroup>
-                                        </CommandList>
-                                    </Command>
-                                </PopoverContent>
-                            </Popover>
+                                </ProductFormDialog>
+                            </div>
                         </div>
                     </div>
 
@@ -844,26 +853,24 @@ export function RepairFormDialog({ repairJob, children }: RepairFormDialogProps)
                 <FormField control={form.control} name="notes" render={({ field }) => (
                     <FormItem><FormLabel>Notas Internas</FormLabel><FormControl><Textarea placeholder="Añade cualquier nota interna..." {...field} disabled={isReadOnly} /></FormControl><FormMessage /></FormItem>
                 )}/>
-                <DialogFooter>
-                    {repairJob && !isReadOnly && (
-                        <div className="flex gap-2">
-                             <Button type="button" variant="outline" onClick={() => onPrint(repairJob, 'internal')}>
+                <DialogFooter className="flex-wrap gap-2">
+                    {repairJob && (
+                        <>
+                            <Button type="button" variant="outline" onClick={() => onPrintCustomer(repairJob)}>
                                 <Printer className="mr-2 h-4 w-4" />
-                                Imprimir (Interna)
+                                Nota Cliente
                             </Button>
-                            <Button type="button" variant="outline" onClick={() => onPrint(repairJob, 'client')}>
+                            <Button type="button" variant="outline" onClick={() => onPrintInternal(repairJob)}>
                                 <Printer className="mr-2 h-4 w-4" />
-                                Imprimir (Cliente)
+                                Control Interno
                             </Button>
-                        </div>
+                        </>
                     )}
-                    <Button type="submit">{isReadOnly ? 'Cerrar' : (repairJob ? 'Guardar Cambios' : 'Registrar y Imprimir Ticket')}</Button>
+                    <Button type="submit">{isReadOnly ? 'Cerrar' : (repairJob ? 'Guardar Cambios' : 'Registrar e Imprimir')}</Button>
                 </DialogFooter>
             </form>
-        </Form>
       </DialogContent>
     </Dialog>
+    </Form>
   );
 }
-
-    

@@ -33,7 +33,7 @@ import { Checkbox } from "../ui/checkbox";
 import { Textarea } from "../ui/textarea";
 import { useCurrency } from "@/hooks/use-currency";
 import { Separator } from "../ui/separator";
-import { Info, PackagePlus, Search, Trash2 } from "lucide-react";
+import { Info, PackagePlus, Search, Trash2, Percent } from "lucide-react";
 import { format } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "../ui/command";
@@ -49,6 +49,10 @@ const formSchema = z.object({
   category: z.string().min(2, { message: "La categoría es obligatoria." }),
   sku: z.string(),
   costPrice: z.coerce.number().min(0, { message: "El precio de costo debe ser positivo." }),
+  isFixedPrice: z.boolean().optional(),
+  fixedPrice: z.coerce.number().min(0).optional(),
+  hasCustomMargin: z.boolean().optional(),
+  customMargin: z.coerce.number().optional(),
   hasPromoPrice: z.boolean().optional(),
   promoPrice: z.coerce.number().optional(),
   stockLevel: z.coerce.number().int({ message: "El stock debe ser un número entero." }).min(0, "El stock no puede ser negativo."),
@@ -91,6 +95,10 @@ export function ProductFormDialog({ product, children, productCount = 0 }: Produ
       category: "",
       sku: "",
       costPrice: 0,
+      isFixedPrice: false,
+      fixedPrice: 0,
+      hasCustomMargin: false,
+      customMargin: 0,
       hasPromoPrice: false,
       promoPrice: 0,
       stockLevel: 1,
@@ -109,6 +117,10 @@ export function ProductFormDialog({ product, children, productCount = 0 }: Produ
   });
 
   const costPrice = form.watch("costPrice");
+  const isFixedPrice = form.watch("isFixedPrice");
+  const fixedPrice = form.watch("fixedPrice");
+  const hasCustomMargin = form.watch("hasCustomMargin");
+  const customMargin = form.watch("customMargin");
   const hasPromo = form.watch("hasPromoPrice");
   const isCombo = form.watch("isCombo");
   const comboItems = form.watch("comboItems");
@@ -129,9 +141,14 @@ export function ProductFormDialog({ product, children, productCount = 0 }: Produ
   }, [isCombo, comboCost, form]);
 
 
-  const calculatedRetailPrice = getDynamicPrice(costPrice);
+  const calculatedRetailPrice = useMemo(() => {
+    if (isFixedPrice) return fixedPrice || 0;
+    const marginToUse = hasCustomMargin ? (customMargin || 0) : profitMargin;
+    return getDynamicPrice(costPrice, marginToUse);
+  }, [isFixedPrice, fixedPrice, hasCustomMargin, customMargin, costPrice, getDynamicPrice, profitMargin]);
+
   const calculatedRetailPriceBs = convert(calculatedRetailPrice, 'USD', 'Bs');
-  const suggestedPromoPrice = costPrice * (1 + profitMargin / 100);
+  const suggestedPromoPrice = costPrice * (1 + (hasCustomMargin ? (customMargin || 0) : profitMargin) / 100);
 
    useEffect(() => {
     if(!hasPromo) {
@@ -152,6 +169,10 @@ export function ProductFormDialog({ product, children, productCount = 0 }: Produ
               comboItems: product.comboItems || [],
               isGiftable: product.isGiftable || false,
               damagedStock: product.damagedStock || 0,
+              isFixedPrice: product.isFixedPrice || false,
+              fixedPrice: product.fixedPrice || 0,
+              hasCustomMargin: product.hasCustomMargin || false,
+              customMargin: product.customMargin || 0,
             });
         } else {
             form.reset({
@@ -159,6 +180,10 @@ export function ProductFormDialog({ product, children, productCount = 0 }: Produ
                 category: "",
                 sku: generateSku(),
                 costPrice: 0,
+                isFixedPrice: false,
+                fixedPrice: 0,
+                hasCustomMargin: false,
+                customMargin: 0,
                 hasPromoPrice: false,
                 promoPrice: 0,
                 stockLevel: 1,
@@ -192,7 +217,7 @@ export function ProductFormDialog({ product, children, productCount = 0 }: Produ
       
     const { hasPromoPrice, ...restOfValues } = values;
 
-    const finalValues: Omit<Product, 'id' | 'retailPrice'> = {
+    const finalValues: Omit<Product, 'id'> = {
         ...restOfValues,
         compatibleModels: compatibleModelsArray,
         promoPrice: hasPromoPrice ? values.promoPrice : 0,
@@ -201,6 +226,10 @@ export function ProductFormDialog({ product, children, productCount = 0 }: Produ
         comboItems: values.isCombo ? values.comboItems : [],
         costPrice: values.isCombo ? comboCost : values.costPrice,
         isGiftable: values.isGiftable || false,
+        isFixedPrice: values.isFixedPrice || false,
+        fixedPrice: values.isFixedPrice ? values.fixedPrice : 0,
+        hasCustomMargin: values.hasCustomMargin || false,
+        customMargin: values.hasCustomMargin ? values.customMargin : 0,
     };
 
     if (product && product.id) {
@@ -294,7 +323,7 @@ export function ProductFormDialog({ product, children, productCount = 0 }: Produ
             </div>
 
             <Separator />
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pt-2">
+            <div className="flex flex-wrap gap-4 pt-2">
                 <FormField
                     control={form.control}
                     name="isCombo"
@@ -307,7 +336,7 @@ export function ProductFormDialog({ product, children, productCount = 0 }: Produ
                                 />
                             </FormControl>
                             <FormLabel className="font-normal cursor-pointer">
-                                Es un Combo/Paquete
+                                Es un Combo
                             </FormLabel>
                         </FormItem>
                     )}
@@ -324,7 +353,47 @@ export function ProductFormDialog({ product, children, productCount = 0 }: Produ
                                 />
                             </FormControl>
                             <FormLabel className="font-normal cursor-pointer">
-                                Puede ser obsequiado
+                                Obsequiable
+                            </FormLabel>
+                        </FormItem>
+                    )}
+                />
+                 <FormField
+                    control={form.control}
+                    name="isFixedPrice"
+                    render={({ field }) => (
+                        <FormItem className="flex flex-row items-center space-x-2 space-y-0">
+                            <FormControl>
+                                <Checkbox
+                                    checked={field.value}
+                                    onCheckedChange={(val) => {
+                                        field.onChange(val);
+                                        if (val) form.setValue('hasCustomMargin', false);
+                                    }}
+                                />
+                            </FormControl>
+                            <FormLabel className="font-normal cursor-pointer">
+                                Precio Fijo
+                            </FormLabel>
+                        </FormItem>
+                    )}
+                />
+                <FormField
+                    control={form.control}
+                    name="hasCustomMargin"
+                    render={({ field }) => (
+                        <FormItem className="flex flex-row items-center space-x-2 space-y-0">
+                            <FormControl>
+                                <Checkbox
+                                    checked={field.value}
+                                    onCheckedChange={(val) => {
+                                        field.onChange(val);
+                                        if (val) form.setValue('isFixedPrice', false);
+                                    }}
+                                />
+                            </FormControl>
+                            <FormLabel className="font-normal cursor-pointer">
+                                Margen Indiv. (%)
                             </FormLabel>
                         </FormItem>
                     )}
@@ -411,15 +480,68 @@ export function ProductFormDialog({ product, children, productCount = 0 }: Produ
                             }}
                         />
                         </FormControl>
-                        <FormDescription>{isCombo ? "Costo calculado de los componentes." : "Este es el costo base para los cálculos de precios."}</FormDescription>
+                        <FormDescription>{isCombo ? "Costo calculado de los componentes." : "Costo base para cálculos."}</FormDescription>
                         <FormMessage />
                     </FormItem>
                     )}
                 />
+
+                {isFixedPrice && (
+                    <FormField
+                        control={form.control}
+                        name="fixedPrice"
+                        render={({ field }) => (
+                        <FormItem>
+                            <FormLabel>Precio de Venta Fijo ($)</FormLabel>
+                            <FormControl>
+                            <Input 
+                                type="text"
+                                inputMode="decimal"
+                                placeholder="0.00"
+                                {...field}
+                                 onChange={e => {
+                                    const value = e.target.value;
+                                    const regex = /^[0-9]*\.?[0-9]{0,2}$/;
+                                    if (regex.test(value)) {
+                                        field.onChange(value);
+                                    }
+                                }}
+                            />
+                            </FormControl>
+                            <FormDescription>Este monto en $ será inamovible. Solo cambiará su valor en Bs según BCV.</FormDescription>
+                            <FormMessage />
+                        </FormItem>
+                        )}
+                    />
+                )}
+
+                {hasCustomMargin && (
+                    <FormField
+                        control={form.control}
+                        name="customMargin"
+                        render={({ field }) => (
+                        <FormItem>
+                            <FormLabel>Margen de Ganancia Individual (%)</FormLabel>
+                            <FormControl>
+                            <Input 
+                                type="number"
+                                placeholder="Ej: 50"
+                                {...field}
+                            />
+                            </FormControl>
+                            <FormDescription>Sobrepasa el margen global ({profitMargin}%).</FormDescription>
+                            <FormMessage />
+                        </FormItem>
+                        )}
+                    />
+                )}
+
                 <div className="p-3 rounded-md bg-muted/50 text-sm">
                     <div className="flex items-center gap-2 mb-2">
                         <Info className="w-4 h-4 text-muted-foreground"/>
-                        <p className="font-semibold">Precio de Venta Dinámico (Sugerido)</p>
+                        <p className="font-semibold">
+                            {isFixedPrice ? "Precio Fijo Actual" : (hasCustomMargin ? "Precio con Margen Individual" : "Precio con Margen Global")}
+                        </p>
                     </div>
                     <div className="flex justify-between">
                         <span className="text-muted-foreground">Precio en Dólares (BCV):</span>
@@ -465,7 +587,7 @@ export function ProductFormDialog({ product, children, productCount = 0 }: Produ
                             />
                             </FormControl>
                              <FormDescription>
-                                Sugerido: <span className="font-semibold">{getSymbol('USD')}{formatCurrency(suggestedPromoPrice, 'USD')}</span> (Costo + {profitMargin}% de ganancia).
+                                Sugerido: <span className="font-semibold">{getSymbol('USD')}{formatCurrency(suggestedPromoPrice, 'USD')}</span> (Costo + {hasCustomMargin ? customMargin : profitMargin}%).
                             </FormDescription>
                             <FormMessage />
                         </FormItem>
@@ -483,7 +605,6 @@ export function ProductFormDialog({ product, children, productCount = 0 }: Produ
                     <FormControl>
                       <Input type="number" {...field} disabled={isCombo}/>
                     </FormControl>
-                    {isCombo && <FormDescription>El stock de un combo se basa en sus componentes.</FormDescription>}
                     <FormMessage />
                   </FormItem>
                 )}

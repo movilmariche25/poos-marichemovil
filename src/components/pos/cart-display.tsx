@@ -1,5 +1,4 @@
 
-
 "use client";
 
 import type { CartItem, Payment, Product, Sale, RepairJob } from "@/lib/types";
@@ -40,7 +39,7 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
   const { firestore } = useFirebase();
   const { toast } = useToast();
   const router = useRouter();
-  const { format: formatCurrency, convert, getDynamicPrice, getSymbol } = useCurrency();
+  const { format: formatCurrency, convert, getFinalPrice, getSymbol } = useCurrency();
   const [discount, setDiscount] = useState(0);
   
   const repairJobRef = useMemoFirebase(() => 
@@ -58,6 +57,10 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
        }
        return 0;
     }
+
+    if (item.isCustom) {
+        return item.customPrice || 0;
+    }
     
     const product = allProducts.find(p => p.id === item.productId);
     if (!product) return 0;
@@ -66,7 +69,7 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
         return product.promoPrice;
     }
     
-    return getDynamicPrice(product.costPrice);
+    return getFinalPrice(product);
   };
   
   const subtotal = cart.reduce((acc, item) => {
@@ -94,9 +97,8 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
             const productDocs = new Map<string, DocumentSnapshot<DocumentData>>();
             const allNeededProductIds = new Set<string>();
     
-            // Phase 1.1: Discover all unique product IDs we need to read from the cart
             for (const item of cartWithFinalPrices) {
-                if (item.productId.startsWith('abono-')) continue;
+                if (item.productId.startsWith('abono-') || item.isCustom) continue;
     
                 if (item.isRepair && activeRepairJob?.reservedParts) {
                     for (const part of activeRepairJob.reservedParts) {
@@ -113,7 +115,6 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
                 }
             }
             
-            // Phase 1.2: Read all necessary product documents
             const allIds = Array.from(allNeededProductIds);
             if (allIds.length > 0) {
                 const fetchedDocsPromises = allIds.map(id => transaction.get(doc(firestore, 'products', id)));
@@ -127,14 +128,11 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
                 }
             }
             
-            // --- ALL READS ARE NOW COMPLETE ---
-    
-            // Phase 2: Calculate decrements
             const stockDecrements = new Map<string, number>();
             const reservedDecrements = new Map<string, number>();
     
             for (const item of cartWithFinalPrices) {
-                if (item.productId.startsWith('abono-')) continue;
+                if (item.productId.startsWith('abono-') || item.isCustom) continue;
     
                 if (item.isRepair && activeRepairJob?.reservedParts) {
                     for (const part of activeRepairJob.reservedParts) {
@@ -155,7 +153,6 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
                 }
             }
     
-            // Phase 3: Apply writes
             for (const [productId, decrementQuantity] of stockDecrements.entries()) {
                 const productDoc = productDocs.get(productId)!;
                 const productData = productDoc.data() as Product;
@@ -163,7 +160,6 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
                 const isRepairPart = reservedDecrements.has(productId);
 
                 if (isRepairPart) {
-                    // This is a repair part being consumed from reservation.
                     const reservedDecrement = reservedDecrements.get(productId)!;
                      if (productData.stockLevel < decrementQuantity || (productData.reservedStock || 0) < reservedDecrement) {
                         throw new Error(`Error de consistencia de stock para la pieza reservada "${productData.name}".`);
@@ -174,7 +170,6 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
                         reservedStock: Math.max(0, newReservedStock)
                     });
                 } else {
-                    // This is a standard sale item. Check against available stock.
                     const availableStockForCheck = productData.stockLevel - (productData.reservedStock || 0);
                     if (decrementQuantity > availableStockForCheck) {
                         throw new Error(`Error de stock: No hay suficientes unidades de "${productData.name}".`);
@@ -204,7 +199,7 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
         const isNowPaidInFull = newTotalPaid >= activeRepairJob.estimatedCost;
 
         batch.set(repairJobRef, { 
-            status: 'Completado', 
+            status: isNowPaidInFull ? 'Pagado' : 'Pendiente', 
             amountPaid: newTotalPaid,
             isPaid: isNowPaidInFull,
         }, { merge: true });
@@ -275,6 +270,8 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
                         if (item.isRepair && activeRepairJob) {
                             displayName = `Reparación: ${activeRepairJob.deviceMake} ${activeRepairJob.deviceModel}`;
                             displayDescription = `(Costo Total: ${getSymbol()}${formatCurrency(activeRepairJob.estimatedCost)}, Pagado: ${getSymbol()}${formatCurrency(activeRepairJob.amountPaid || 0)})`;
+                        } else if (item.isCustom) {
+                            displayDescription = "(Artículo Manual)";
                         }
 
                         return (
@@ -293,11 +290,11 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onRemoveItem,
                                 </div>
                             </TableCell>
                             <TableCell className="text-center">
-                                <Input 
+                                <input 
                                     type="number" 
                                     value={item.quantity} 
-                                    onChange={(e) => onUpdateQuantity(item.productId, parseInt(e.target.value))}
-                                    className="w-16 text-center"
+                                    onChange={(e) => onUpdateQuantity(item.productId, parseInt(e.target.value) || 0)}
+                                    className="w-16 text-center border rounded-md h-8 text-sm"
                                     disabled={item.isRepair}
                                 />
                             </TableCell>

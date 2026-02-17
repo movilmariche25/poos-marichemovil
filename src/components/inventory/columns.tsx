@@ -1,5 +1,4 @@
 
-
 "use client"
 
 import type { ColumnDef } from "@tanstack/react-table"
@@ -13,7 +12,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { ArrowUpDown, MoreHorizontal, Edit, Trash2, TicketPercent, PackagePlus } from "lucide-react"
+import { ArrowUpDown, MoreHorizontal, Edit, Trash2, TicketPercent, PackagePlus, Lock, Percent } from "lucide-react"
 import { Badge } from "../ui/badge"
 import { ProductFormDialog } from "./product-form-dialog"
 import { useToast } from "@/hooks/use-toast"
@@ -54,8 +53,6 @@ const ActionsCell = ({ product }: { product: Product }) => {
     }
     
     const handleTriggerEdit = () => {
-        // This is a bit of a hack to programmatically click the trigger
-        // because the AdminAuthDialog consumes the click event.
         document.getElementById(`edit-trigger-${product.id}`)?.click();
     }
 
@@ -86,13 +83,10 @@ const ActionsCell = ({ product }: { product: Product }) => {
                 </DropdownMenuContent>
             </DropdownMenu>
 
-            {/* Hidden trigger for authorized edit */}
             <ProductFormDialog product={product}>
                 <button id={`edit-trigger-${product.id}`} style={{ display: 'none' }}></button>
             </ProductFormDialog>
 
-
-            {/* Alert for deleting */}
              <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
                  <AlertDialogContent>
                     <AlertDialogHeader>
@@ -160,6 +154,8 @@ export const columns: ColumnDef<Product>[] = [
                 <div className="font-medium flex items-center gap-2">
                     {product.name}
                     {product.isCombo && <PackagePlus className="h-4 w-4 text-muted-foreground" title="Combo" />}
+                    {product.isFixedPrice && <Lock className="h-3 w-3 text-amber-500" title="Precio Fijo" />}
+                    {product.hasCustomMargin && !product.isFixedPrice && <Percent className="h-3 w-3 text-blue-500" title={`Margen Indiv: ${product.customMargin}%`} />}
                 </div>
                 {compatibleModels.length > 0 && (
                     <div className="text-xs text-muted-foreground truncate" title={compatibleModels.join(', ')}>
@@ -190,20 +186,8 @@ export const columns: ColumnDef<Product>[] = [
     cell: ({ row }) => {
         const product = row.original;
         const stock: number = product.stockLevel;
-        
-        if (product.isCombo) {
-            return <div className="text-center"><Badge variant="outline">Combo</Badge></div>
-        }
-
+        if (product.isCombo) return <div className="text-center"><Badge variant="outline">Combo</Badge></div>
         return <div className="text-center"><Badge variant="secondary">{stock}</Badge></div>
-    }
-  },
-  {
-    accessorKey: "reservedStock",
-    header: () => <div className="text-center">Reservado</div>,
-    cell: ({ row }) => {
-        const reserved = row.original.reservedStock || 0;
-        return <div className="text-center"><Badge variant={reserved > 0 ? "outline" : "secondary"}>{reserved}</Badge></div>
     }
   },
   {
@@ -223,14 +207,12 @@ export const columns: ColumnDef<Product>[] = [
                   ...comboItems.map(item => {
                       const component = allProducts.find(p => p.id === item.productId);
                       if (!component) return 0;
-                      // Available = Total - Reserved - Damaged
                       const componentAvailable = component.stockLevel - (component.reservedStock || 0) - (component.damagedStock || 0);
                       return Math.floor(componentAvailable / item.quantity);
                   })
               );
           }
       } else {
-          // Available = Total - Reserved - Damaged
           availableStock = product.stockLevel - (product.reservedStock || 0) - (product.damagedStock || 0);
       }
       
@@ -248,20 +230,11 @@ export const columns: ColumnDef<Product>[] = [
     }
   },
   {
-    accessorKey: "damagedStock",
-    header: () => <div className="text-center">Dañado</div>,
-    cell: ({ row }) => {
-        const damaged = row.original.damagedStock || 0;
-        return <div className="text-center"><Badge variant={damaged > 0 ? "destructive" : "secondary"}>{damaged}</Badge></div>
-    }
-  },
-  {
     accessorKey: "costPrice",
     header: () => <div className="text-right">Precio de Costo</div>,
     cell: function Cell({ row }) {
         const { format } = useCurrency();
         const amountUSD = parseFloat(row.getValue("costPrice"));
-   
         return (
           <div className="text-right">
             <div className="font-medium">${format(amountUSD)}</div>
@@ -273,31 +246,28 @@ export const columns: ColumnDef<Product>[] = [
     accessorKey: "retailPrice",
     header: () => <div className="text-right">Precio de Venta</div>,
     cell: function Cell({ row }) {
-        const { format, convert, getDynamicPrice } = useCurrency();
+        const { format, convert, getFinalPrice } = useCurrency();
         const product = row.original;
         
-        // This is now always dynamic based on cost price and margin.
-        const dynamicPrice = getDynamicPrice(product.costPrice);
-        
-        // Promo price still takes priority for display if it exists.
+        const basePrice = getFinalPrice(product);
         const promoPrice = (typeof product.promoPrice === 'number' && product.promoPrice > 0) ? product.promoPrice : 0;
         const hasPromo = promoPrice > 0;
         
-        const displayPrice = hasPromo ? promoPrice : dynamicPrice;
-        
-        // BS amount is ALWAYS calculated from the non-promo price.
-        const amountBs = convert(dynamicPrice, 'USD', 'Bs');
+        const displayPrice = hasPromo ? promoPrice : basePrice;
+        const amountBs = convert(displayPrice, 'USD', 'Bs');
    
         return (
           <div className="text-right">
-            <div className={cn("font-medium", hasPromo && "text-green-600")}>
-              {hasPromo && <TicketPercent className="w-3 h-3 inline-block mr-1" />}
+            <div className={cn("font-medium flex items-center justify-end gap-1", hasPromo && "text-green-600")}>
+              {product.isFixedPrice && !hasPromo && <Lock className="w-3 h-3 text-amber-500" title="Precio Fijo" />}
+              {product.hasCustomMargin && !product.isFixedPrice && !hasPromo && <Percent className="w-3 h-3 text-blue-500" title={`Margen Individual: ${product.customMargin}%`} />}
+              {hasPromo && <TicketPercent className="w-3 h-3 inline-block" />}
               ${format(displayPrice)}
             </div>
 
-            {hasPromo && dynamicPrice !== promoPrice && (
+            {hasPromo && basePrice !== promoPrice && (
               <div className="text-xs text-muted-foreground line-through">
-                Ref: ${format(dynamicPrice)}
+                Ref: ${format(basePrice)}
               </div>
             )}
             
@@ -313,5 +283,3 @@ export const columns: ColumnDef<Product>[] = [
     cell: ({ row }) => <ActionsCell product={row.original} />,
   },
 ]
-
-    
